@@ -16,7 +16,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  # Windows starts hook commands through cmd.exe (`shell: true` in the hooks
+  # runtime), so a .sh file cannot run there and the shipped binaries must be
+  # .exe. This job proves the C sources build and behave on Windows; the shell
+  # test suites stay on the POSIX cells because they assume sh.
+  windows:
+    name: windows-x86_64 (build + smoke)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install MinGW
+        run: |
+          choco install mingw --no-progress -y
+          echo "C:/ProgramData/mingw64/mingw64/bin" >> "$GITHUB_PATH"
+
+      - name: Build the two hooks
+        run: |
+          set -e
+          mkdir -p bin/prebuilt/windows-x86_64
+          x86_64-w64-mingw32-gcc -O2 -std=c11 -Wall -Wextra \
+            c/cbm_nudge.c -o bin/prebuilt/windows-x86_64/cbm_nudge.exe
+          x86_64-w64-mingw32-gcc -O2 -std=c11 -Wall -Wextra \
+            c/secret_guard.c -o bin/prebuilt/windows-x86_64/secret_guard.exe
+          file bin/prebuilt/windows-x86_64/*.exe
+
+      - name: Smoke test the guard
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+        run: |
+          set +e
+          printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"C:/Users/x/.kimi-code/config.toml"}}' \
+            | ./bin/prebuilt/windows-x86_64/secret_guard.exe
+          blocked=$?
+          printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"README.md"}}' \
+            | ./bin/prebuilt/windows-x86_64/secret_guard.exe
+          allowed=$?
+          printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":[{"type":"text","text":"who calls parse_config"}]}' \
+            | ./bin/prebuilt/windows-x86_64/cbm_nudge.exe > nudge.txt
+          nudge=$?
+          set -e
+          [ "$blocked" = "2" ] || { echo "guard: expected block exit 2, got $blocked"; exit 1; }
+          [ "$allowed" = "0" ] || { echo "guard: expected allow exit 0, got $allowed"; exit 1; }
+          [ "$nudge" = "0" ] || { echo "nudge: expected exit 0, got $nudge"; exit 1; }
+          grep -q "Structure question detected" nudge.txt || { echo "nudge printed nothing"; exit 1; }
+          echo "windows smoke: block=$blocked allow=$allowed nudge=$nudge"
+
+      - name: Upload Windows binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-windows-x86_64
+          path: bin/prebuilt/windows-x86_64/
+          if-no-files-found: error
+          retention-days: 14
+
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 15

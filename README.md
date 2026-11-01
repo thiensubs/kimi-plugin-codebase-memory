@@ -12,6 +12,27 @@ Three pieces, one install:
 | **Nudge** | `bin/cbm_nudge`, a ~58 ms C `UserPromptSubmit` hook that reminds the agent to query the graph on structure questions |
 | **Guard** | `bin/secret_guard`, a C `PreToolUse` hook that blocks credential reads and plaintext provider keys, with a `redact` filter for the cases where a value must be inspected |
 
+## What the install line means
+
+When the plugin installs, Kimi Code prints:
+
+```
+codebase-memory · Local · 1 skill · 1 MCP server · 2 hooks · 4 commands
+```
+
+Four pieces of furniture in one room:
+
+| Piece | In plain words | In this plugin |
+| --- | --- | --- |
+| **1 skill** | a recipe card taped to the fridge: the agent reads it before it starts cooking | "look in the graph first, not in the cabinets" |
+| **1 MCP server** | a pantry with an index-card box: somebody else holds the ingredients | the code graph — symbols, callers, imports, impact |
+| **2 hooks** | two doorbells the house rings by itself | *bell 1:* a prompt arrives → remind about the graph. *bell 2:* a tool is about to run → check it for secrets |
+| **4 commands** | the four buttons you press yourself | `/status` · `/index` `/reindex` · `/audit-secrets` |
+
+Nothing else is installed: no daemon, no background service, no `node_modules`. `Local` only
+means it came from a folder or zip on this machine instead of from a marketplace entry (`Curated`)
+or from Kimi's own catalog (`Official`).
+
 ## How it works, in one picture
 
 ```
