@@ -4,6 +4,22 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-11-01
+
+### Added
+
+- Sampled self-check in both hooks: every 10th run counts its own allocations and frees, writes
+  `selfcheck ok …` to `$KIMI_CODE_HOME/logs/<tool>.runs.log`, and, if anything is still live,
+  prints a one-line report naming live/allocs/frees, version and platform so it can be pasted into
+  an issue. `SG_SELFCHECK_STATE` overrides the counter path (tests), `SG_SELFTEST_LEAK` plants a
+  leak (self-test only).
+
+### Verified
+
+- Leak audit with macOS `leaks --atExit` over seven paths — allow, credential block, registry
+  hit, redact, fingerprint, malformed payload, 1 MB input — all report 0 leaks. ASan was rejected
+  for this purpose: Apple clang answers `detect_leaks is not supported on this platform`.
+
 ## [0.2.2] - 2026-11-01
 
 ### Added

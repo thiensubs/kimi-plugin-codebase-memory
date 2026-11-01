@@ -195,6 +195,24 @@ it, even if the provider changes the key format. `--secrets` restricts the outpu
 pattern rules already flag, so a URL or a model id in the same file is not registered. At 40 bits
 a collision needs ~1.5M registered values; a registry of hundreds is nowhere near it.
 
+### Self-check, every 10th run
+
+Both hooks count their own allocations and frees. A clean sampled run appends one line to
+`$KIMI_CODE_HOME/logs/<tool>.runs.log`:
+
+```
+selfcheck ok allocs=3 frees=3 version=0.2.3 darwin-x86_64
+```
+
+If a run ends with memory still live, it prints one line naming live/allocs/frees, the version,
+the platform and the issue URL — for the guard as a hook `message` (so it shows in the session),
+for the nudge as plain text — and the same line goes to the log. Paste that line into an issue and
+the count is enough to reproduce.
+
+Leak audit 2026-11-01 with macOS `leaks --atExit`: seven paths (allow, credential-path block,
+registry hit, `redact`, `fingerprint`, malformed payload, 1 MB input) → 0 leaks each. ASan is not
+usable for this on macOS: Apple clang prints `detect_leaks is not supported on this platform`.
+
 ## Install
 
 ```sh

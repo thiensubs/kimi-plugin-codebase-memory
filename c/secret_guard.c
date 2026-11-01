@@ -36,6 +36,11 @@
 #define sg_mkdir(p) mkdir((p), 0700)
 #endif
 
+#define SG_TOOL "secret_guard"
+#define SG_VERSION "0.2.3"
+#define SG_JSON 1
+#include "selfcheck.h"
+
 #define SG_MAX_INPUT (32u * 1024u * 1024u)
 #define MAX_TOKENS 256
 

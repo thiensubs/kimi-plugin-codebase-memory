@@ -20,6 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define SG_TOOL "cbm_nudge"
+#define SG_VERSION "0.2.3"
+#define SG_JSON 0
+#include "selfcheck.h"
+
 #define MAX_PAYLOAD 65536
 #define PROMPT_MAX 8192
 #define CWD_MAX 1024
