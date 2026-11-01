@@ -1,5 +1,5 @@
 @echo off
-rem Windows entry point, the cmd.exe twin of bin/run.sh.
+rem Windows entry point, the cmd.exe twin of bin/run.
 rem Kimi Code starts hooks with `shell: true`, so on Windows the command line is
 rem handed to cmd.exe and a .sh file cannot run. This script picks the prebuilt
 rem .exe for this machine instead. There is no compile fallback: Windows has no

@@ -18,8 +18,8 @@ This lane outranks every other rule here. It applies to every file, indexed or n
 - Quote a secret only as `[REDACTED:<provider>]`: `[REDACTED:nvidia]`, `[REDACTED:github]`.
   No value, no prefix, no suffix, no length, no "starts with sk-".
 - When a file that contains secrets has to be shown, run
-  `./bin/run.sh secret_guard redact <path>` and read that output. Do not open the original instead.
-- The plugin's `PreToolUse` hook runs `./bin/run.sh secret_guard` before every tool call and
+  `./bin/run secret_guard redact <path>` and read that output. Do not open the original instead.
+- The plugin's `PreToolUse` hook runs `./bin/run secret_guard` before every tool call and
   blocks it (exit 2) when a Bash command, path or argument would read or print a credential file,
   including silent leaks such as piping a config through a summariser. A block is a rule, not an
   obstacle: do not retry through another tool, another spelling of the path, or a `Task` prompt.

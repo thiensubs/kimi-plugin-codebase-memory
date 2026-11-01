@@ -4,6 +4,27 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-11-01
+
+### Added
+
+- Windows x86_64: a `windows-latest` build job produces `bin/prebuilt/windows-x86_64/*.exe`, the
+  release archive ships them, and `bin/run.cmd` is the cmd.exe twin of the dispatcher.
+
+### Changed
+
+- `bin/run.sh` is now `bin/run`, so one manifest command resolves on every platform: by shebang on
+  macOS and Linux, by `PATHEXT` (`.CMD`) under cmd.exe on Windows.
+- The MCP server command is `codebase-memory-mcp`, resolved from `PATH`, instead of the bundled
+  `bin/codebase-memory-mcp.sh`. MCP servers are spawned without a shell and a `.sh` shim can never
+  start on Windows. `bin/codebase-memory-mcp.sh` stays for launches with a minimal `PATH`; point
+  `mcp.json` at it if you need that fallback.
+
+### Fixed
+
+- Directory creation uses a `_WIN32` shim (`_mkdir`), because MinGW declares a one-argument
+  `mkdir` that rejects the POSIX two-argument call.
+
 ## [0.2.1] - 2026-11-01
 
 ### Added
@@ -35,7 +56,7 @@ All notable changes to this plugin are documented here. The format follows
   `[REDACTED:<label>]` and always exits 0; the hook allows a command piped through it.
 - **`/codebase-memory:audit-secrets`** — lists credential-looking paths in the graph index
   and turns them into `.cbmignore` entries without opening them.
-- **Portable dispatcher** — `bin/run.sh` resolves `bin/prebuilt/<os>-<arch>/<tool>`, falls
+- **Portable dispatcher** — `bin/run` resolves `bin/prebuilt/<os>-<arch>/<tool>`, falls
   back to a cached compile under `${XDG_CACHE_HOME:-~/.cache}`, and on any failure writes one
   log line and exits 0 so a hook can never block a prompt. POSIX `sh`, follows symlinked
   installs, validates the tool name so it cannot escape the plugin root.
@@ -52,7 +73,7 @@ All notable changes to this plugin are documented here. The format follows
 ### Changed
 
 - `kimi.plugin.json` is now 0.2.0 and declares two hooks, `UserPromptSubmit` and
-  `PreToolUse`, both invoked through `./bin/run.sh <tool>`.
+  `PreToolUse`, both invoked through `./bin/run <tool>`.
 - `build-c.sh` builds every `c/*.c` into `bin/prebuilt/<os>-<arch>/` and refreshes `bin/`,
   with `-O2 -std=c11 -Wall -Wextra`.
 

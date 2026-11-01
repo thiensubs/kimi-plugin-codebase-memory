@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# tests/test-dispatcher.sh — prove bin/run.sh dispatches, compiles and fails open.
+# tests/test-dispatcher.sh — prove bin/run dispatches, compiles and fails open.
 #
-# The checks run against a throwaway plugin root in .tmp/ (real bin/run.sh
+# The checks run against a throwaway plugin root in .tmp/ (real bin/run
 # copied in, fake c/ and bin/prebuilt/) so nothing here touches the plugin's
 # own c/ or bin/prebuilt/ tree. One final check drives the real dispatcher and
 # the real cbm_nudge end to end.
 set -uo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-run_sh=$root/bin/run.sh
+run_sh=$root/bin/run
 work=$root/.tmp/build-layer-dispatcher
 
 pass=0
@@ -36,8 +36,8 @@ rm -rf "$work"
 mkdir -p "$work/plugin/bin/prebuilt/$plat" "$work/plugin/c" \
          "$work/home" "$work/cache/prebuilt" "$work/cache/compile" \
          "$work/cache/noc" "$work/cache/real" "$work/bin-min" "$work/bin-empty"
-cp "$run_sh" "$work/plugin/bin/run.sh"
-chmod +x "$work/plugin/bin/run.sh"
+cp "$run_sh" "$work/plugin/bin/run"
+chmod +x "$work/plugin/bin/run"
 
 cat > "$work/plugin/c/test_probe.c" <<'EOF'
 #include <stdio.h>
@@ -57,7 +57,7 @@ printf '\n'
 EOF
 chmod +x "$prebuilt"
 
-disp=$work/plugin/bin/run.sh
+disp=$work/plugin/bin/run
 
 # -- 1. prebuilt wins over the compiler --------------------------------
 out=$(XDG_CACHE_HOME=$work/cache/prebuilt KIMI_CODE_HOME=$work/home "$disp" test_probe 2>&1)
@@ -74,10 +74,10 @@ out=$(XDG_CACHE_HOME=$work/cache/prebuilt KIMI_CODE_HOME=$work/home "$disp" test
 check_eq "extra arguments reach the binary" "$out" "prebuilt:alpha:b c"
 
 # -- 2. root resolution through a symlink ------------------------------
-ln -sf "$disp" "$work/link-run.sh"
-out=$(XDG_CACHE_HOME=$work/cache/prebuilt KIMI_CODE_HOME=$work/home "$work/link-run.sh" test_probe)
+ln -sf "$disp" "$work/link-run"
+out=$(XDG_CACHE_HOME=$work/cache/prebuilt KIMI_CODE_HOME=$work/home "$work/link-run" test_probe)
 check_eq "symlinked dispatcher still finds the plugin root" "$out" "prebuilt"
-rm -f "$work/link-run.sh"
+rm -f "$work/link-run"
 
 # -- 3. no prebuilt: compile from c/<tool>.c ---------------------------
 rm -f "$prebuilt"
@@ -223,7 +223,7 @@ done
 
 if command -v dash >/dev/null 2>&1; then
   out=$(cd "$work/plugin" && XDG_CACHE_HOME=$work/cache/prebuilt \
-          KIMI_CODE_HOME=$work/home dash bin/run.sh test_probe 2>&1)
+          KIMI_CODE_HOME=$work/home dash bin/run test_probe 2>&1)
   check_eq "runs under dash" "$out" "compiled"
 else
   echo "# skip dash run (dash not installed)"
@@ -244,7 +244,7 @@ spaced="$work/with space"
 mkdir -p "$spaced"
 cp -R "$work/plugin" "$spaced/plugin"
 out=$(XDG_CACHE_HOME="$work/cache with space" KIMI_CODE_HOME="$work/home" \
-        "$spaced/plugin/bin/run.sh" test_probe 2>&1)
+        "$spaced/plugin/bin/run" test_probe 2>&1)
 rc=$?
 check_eq "plugin root and cache path with spaces work" "$out" "compiled"
 check_eq "plugin root with spaces exits 0" "$rc" "0"

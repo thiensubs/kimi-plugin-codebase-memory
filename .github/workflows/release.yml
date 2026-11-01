@@ -19,7 +19,7 @@ env:
   # Stable asset name, so the marketplace can point at one URL forever:
   #   https://github.com/<owner>/<repo>/releases/latest/download/codebase-memory-plugin.zip
   PLUGIN_ARCHIVE: codebase-memory-plugin.zip
-  PLATFORMS: linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64
+  PLATFORMS: linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64 windows-x86_64
 
 jobs:
   build:
@@ -72,9 +72,55 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # Windows needs its own job: the POSIX build script cannot run there, and the
+  # binaries must carry a .exe suffix so cmd.exe can start them.
+  windows:
+    name: build windows-x86_64
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install MinGW
+        run: |
+          choco install mingw --no-progress -y
+          echo "C:/ProgramData/mingw64/mingw64/bin" >> "$GITHUB_PATH"
+
+      - name: Build and smoke test
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+        run: |
+          set -e
+          mkdir -p bin/prebuilt/windows-x86_64
+          for source in c/*.c; do
+            name=$(basename "$source" .c)
+            x86_64-w64-mingw32-gcc -O2 -std=c11 -Wall -Wextra "$source" \
+              -o "bin/prebuilt/windows-x86_64/$name.exe"
+          done
+          file bin/prebuilt/windows-x86_64/*.exe
+          set +e
+          printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"C:/Users/x/.kimi-code/config.toml"}}' \
+            | ./bin/prebuilt/windows-x86_64/secret_guard.exe
+          blocked=$?
+          set -e
+          [ "$blocked" = "2" ] || { echo "guard: expected block exit 2, got $blocked"; exit 1; }
+          echo "windows smoke: block=$blocked"
+
+      - name: Upload prebuilt binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: prebuilt-windows-x86_64
+          path: bin/prebuilt/windows-x86_64/
+          if-no-files-found: error
+          retention-days: 14
+
   package:
     name: package
-    needs: build
+    needs: [build, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -113,10 +159,12 @@ jobs:
               darwin-arm64) want=arm64 ;;
               linux-x86_64) want=x86-64 ;;
               linux-arm64) want=aarch64 ;;
+              windows-x86_64) want=x86-64 ;;
             esac
             for src in "${sources[@]}"; do
               name=$(basename "$src" .c)
               bin="$dir/$name"
+              [ -f "$bin" ] || bin="$dir/$name.exe"
               [ -f "$bin" ] || { echo "::error::$bin is missing"; exit 1; }
               if ! file "$bin" | grep -E -- "$want" >/dev/null; then
                 echo "::error::$bin is not $p"
@@ -196,7 +244,7 @@ jobs:
           for src in c/*.c; do
             name=$(basename "$src" .c)
             for p in $PLATFORMS; do
-              grep -q " bin/prebuilt/$p/$name\$" "$listing" \
+              grep -q " bin/prebuilt/$p/$name(\.exe)?\$" "$listing" \
                 || { echo "::error::$archive is missing bin/prebuilt/$p/$name"; exit 1; }
             done
           done

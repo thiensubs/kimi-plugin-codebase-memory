@@ -99,7 +99,7 @@ printf '%s' "$cred" | "$bin" >/dev/null 2>&1
 rc=$?
 if [ "$rc" = "2" ]; then ok; else bad "bare credential read stays blocked" "rc=$rc"; fi
 
-pipe='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat /Users/x/.kimi-code/config.toml | ./bin/run.sh secret_guard fingerprint"}}'
+pipe='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat /Users/x/.kimi-code/config.toml | ./bin/run secret_guard fingerprint"}}'
 printf '%s' "$pipe" | "$bin" >/dev/null 2>&1
 rc=$?
 if [ "$rc" = "0" ]; then ok; else bad "credential read piped through fingerprint is allowed" "rc=$rc"; fi

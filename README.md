@@ -67,7 +67,7 @@ hop to time out.
 
 | Job | File | Trigger | Cost | Verdict |
 | --- | --- | --- | --- | --- |
-| Graph | `bin/codebase-memory-mcp.sh` (MCP `graph`) | every graph tool call | upstream server | symbols, callers, impact — instead of grepping |
+| Graph | `codebase-memory-mcp` from `PATH` (MCP `graph`) | every graph tool call | upstream server | symbols, callers, impact — instead of grepping |
 | Nudge | `c/cbm_nudge.c` | `UserPromptSubmit` | ~58 ms | one short reminder, or silence |
 | Guard | `c/secret_guard.c` | `PreToolUse` | ~60 ms | exit 0 (allow) or exit 2 + a reason |
 
@@ -97,9 +97,10 @@ zip is 145 KB.
 
 ## 1. The graph
 
-The plugin registers the upstream MCP server as `graph` (stdio, started by
-`bin/codebase-memory-mcp.sh`, which finds the binary even when Kimi Code was launched with a
-minimal `PATH`). Around it:
+The plugin registers the upstream MCP server as `graph` (stdio, command `codebase-memory-mcp`,
+resolved from `PATH` — MCP servers are spawned without a shell, so a bundled `.sh` would never
+start on Windows; `bin/codebase-memory-mcp.sh` remains for launches with a minimal `PATH`, point
+`~/.kimi-code/mcp.json` at it if you need that). Around it:
 
 - `SYSTEM.md` — the discovery rules: graph for structure, text search for literals, the
   session-start checklist, and the traps that make graph answers wrong.
@@ -167,7 +168,7 @@ single-character-class values, and any command piped through the redactor.
 secret with `[REDACTED:<label>]`, always exiting 0:
 
 ```sh
-cat ~/.kimi-code/config.toml | ~/.kimi-code/plugins/managed/codebase-memory/bin/run.sh secret_guard redact
+cat ~/.kimi-code/config.toml | ~/.kimi-code/plugins/managed/codebase-memory/bin/run secret_guard redact
 ```
 
 A command containing `| … redact` is allowed through the guard, so this is the supported way
@@ -185,7 +186,7 @@ Prefix matching only knows shapes. For a key that leaked once, register its **fi
 40 bits of SHA-256, 10 hex chars, never the key itself:
 
 ```sh
-cat ~/.kimi-code/config.toml | ./bin/run.sh secret_guard fingerprint --secrets \
+cat ~/.kimi-code/config.toml | ./bin/run secret_guard fingerprint --secrets \
   > ~/.kimi-code/secret-fingerprints.txt
 ```
 
@@ -225,7 +226,7 @@ checks `CBM_BIN`, `PATH`, `~/.local/bin`, `~/.cargo/bin`, Homebrew and `/usr/loc
 
 ## Platform support
 
-`bin/run.sh` picks the binary by `uname -sm`:
+`bin/run` picks the binary by `uname -sm`:
 
 | Platform | `uname -sm` | Prebuilt directory | In this repository | If missing |
 | --- | --- | --- | --- | --- |
@@ -233,6 +234,7 @@ checks `CBM_BIN`, `PATH`, `~/.local/bin`, `~/.cargo/bin`, Homebrew and `/usr/loc
 | macOS Intel | `Darwin x86_64` | `bin/prebuilt/darwin-x86_64/` | yes | — |
 | Linux x86_64 | `Linux x86_64` | `bin/prebuilt/linux-x86_64/` | release archive | compile once into the cache |
 | Linux arm64 | `Linux aarch64` | `bin/prebuilt/linux-arm64/` | release archive | compile once into the cache |
+| Windows x86_64 | `cmd.exe` | `bin/prebuilt/windows-x86_64/` | release archive | hooks exit 0 and do nothing |
 | anything else | — | — | no | hooks exit 0 and do nothing |
 
 The macOS binaries (~150 KB for both architectures) are committed so a fresh install needs
@@ -246,11 +248,11 @@ and shipped in the release archive; without one, the dispatcher compiles the too
 | Variable | Used by | Effect |
 | --- | --- | --- |
 | `KIMI_CODE_HOME` | all hooks | Set by Kimi Code. Log directory; falls back to `~/.kimi-code` |
-| `KIMI_PLUGIN_ROOT` | all plugin hooks | Set by Kimi Code. Not required: `bin/run.sh` resolves the plugin root from its own path |
-| `XDG_CACHE_HOME` | `bin/run.sh` | Where the fallback compile is cached; defaults to `~/.cache` |
+| `KIMI_PLUGIN_ROOT` | all plugin hooks | Set by Kimi Code. Not required: `bin/run` resolves the plugin root from its own path |
+| `XDG_CACHE_HOME` | `bin/run` | Where the fallback compile is cached; defaults to `~/.cache` |
 | `CBM_BIN` | `bin/codebase-memory-mcp.sh` | Absolute path to the upstream binary when it is not on `PATH` |
 | `CBM_MEM_BUDGET_MB` | upstream server | Indexing memory budget, default 512 MB. Export it before launching Kimi Code |
-| `CC` | `bin/run.sh`, `build-c.sh` | Compiler for the fallback build |
+| `CC` | `bin/run`, `build-c.sh` | Compiler for the fallback build |
 | `CBM_NUDGE_DUMP` | `bin/cbm_nudge` | Writes the last hook payload to `$KIMI_CODE_HOME/logs/cbm-nudge-payload.json` for debugging |
 | `SECRET_GUARD_DISABLE` | — | Not implemented. To stop the guard, disable the plugin with `/plugins disable codebase-memory` |
 
@@ -259,7 +261,7 @@ and shipped in the release archive; without one, the dispatcher compiles the too
 | Symptom | Cause and fix |
 | --- | --- |
 | Graph tools missing from the session | Run `/reload`; check `/plugins info codebase-memory`. If the server logs `codebase-memory-mcp not found`, install it or set `CBM_BIN` |
-| Hooks do nothing at all | Check `$KIMI_CODE_HOME/logs/*.log` for a `run.sh` line: unsupported platform, no compiler, or compile failure. Every failure is fail-open |
+| Hooks do nothing at all | Check `$KIMI_CODE_HOME/logs/*.log` for a `run` line: unsupported platform, no compiler, or compile failure. Every failure is fail-open |
 | First prompt after install is slow | The fallback compile runs once (~1 s) and is cached; later prompts use the cached binary |
 | Nudge stays silent on a structure question | It only fires on its keyword list; confirm the hook runs with `CBM_NUDGE_DUMP=1` and read the payload log |
 | Guard blocks a command you know is safe | Read the rule in `secret-guard.log`, then use `grep -c`, pipe through `secret_guard redact`, or disable the plugin |

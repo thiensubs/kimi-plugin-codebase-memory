@@ -1,6 +1,6 @@
 {
   "name": "codebase-memory",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Graph-first code discovery for Kimi Code: the codebase-memory-mcp knowledge graph plus the workflow rules that make the agent actually use it, with a PreToolUse guard that keeps credential files out of the transcript and out of the index.",
   "keywords": [
     "codebase",
@@ -24,19 +24,19 @@
   "systemPromptPath": "./SYSTEM.md",
   "mcpServers": {
     "graph": {
-      "command": "./bin/codebase-memory-mcp.sh"
+      "command": "codebase-memory-mcp"
     }
   },
   "commands": "./commands/",
   "hooks": [
     {
       "event": "UserPromptSubmit",
-      "command": "./bin/run.sh cbm_nudge",
+      "command": "./bin/run cbm_nudge",
       "timeout": 3
     },
     {
       "event": "PreToolUse",
-      "command": "./bin/run.sh secret_guard",
+      "command": "./bin/run secret_guard",
       "timeout": 3
     }
   ],

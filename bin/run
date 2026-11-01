@@ -1,5 +1,5 @@
 #!/bin/sh
-# bin/run.sh <tool> [args...] — run a plugin hook binary, portably.
+# bin/run <tool> [args...] — run a plugin hook binary, portably.
 #
 # Lookup order:
 #   1. bin/prebuilt/<os>-<arch>/<tool>   shipped binary, no compiler needed
@@ -36,7 +36,7 @@ case $self in
     ;;
 esac
 
-# A symlinked bin/run.sh (some installers link instead of copy) must still
+# A symlinked bin/run (some installers link instead of copy) must still
 # resolve the plugin root, so follow up to 8 links.
 links=0
 while [ -L "$self" ] && [ "$links" -lt 8 ]; do
@@ -155,7 +155,7 @@ if [ -n "$logpath" ]; then
   name=$(printf '%s' "$tool" | tr '_' '-' 2>/dev/null)
   [ -n "$name" ] || name=$tool
   mkdir -p "$logpath" 2>/dev/null &&
-    printf '%s run.sh %s (%s): %s\n' \
+    printf '%s run %s (%s): %s\n' \
       "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" "$tool" "$plat" "$reason" \
       >>"$logpath/$name.log" 2>/dev/null
 fi

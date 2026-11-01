@@ -4,7 +4,7 @@
 
 This document covers the two local C hooks that ship with the plugin —
 `bin/secret_guard` (`c/secret_guard.c`) and `bin/cbm_nudge` (`c/cbm_nudge.c`) — and the
-dispatcher `bin/run.sh` that starts them. The MCP server itself is
+dispatcher `bin/run` that starts them. The MCP server itself is
 [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) and is out of
 scope here; report bugs in it upstream.
 
@@ -78,7 +78,7 @@ Only the value is replaced; the field name and the file structure survive, which
 need in order to reason about a config without leaking it.
 
 ```sh
-cat ~/.kimi-code/config.toml | ~/.kimi-code/plugins/managed/codebase-memory/bin/run.sh secret_guard redact
+cat ~/.kimi-code/config.toml | ~/.kimi-code/plugins/managed/codebase-memory/bin/run secret_guard redact
 ```
 
 The hook treats that pipeline as allowed, so it is the supported way to look at a credential
@@ -94,8 +94,8 @@ out (the default timeout here is 3 s).
 | --- | --- |
 | Empty, malformed or truncated payload | exit 0, allow |
 | Payload larger than 32 MiB | exit 0, allow |
-| No prebuilt for the platform and no compiler | `run.sh` logs one line, exits 0 |
-| Compiler fails | `run.sh` logs one line, exits 0 |
+| No prebuilt for the platform and no compiler | `run` logs one line, exits 0 |
+| Compiler fails | `run` logs one line, exits 0 |
 | Hook times out or crashes | Kimi Code allows the call |
 
 Because of this, the guard is an accident preventer for an agent that reads credentials

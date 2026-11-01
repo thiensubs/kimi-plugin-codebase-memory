@@ -21,7 +21,7 @@ so a release does not run the matrix twice.
 | `darwin-arm64` | `macos-15` | arm64 |
 
 The platform strings are the directory names under `bin/prebuilt/`, which is what
-`bin/run.sh` resolves at runtime (`bin/prebuilt/<os>-<arch>/<tool>`).
+`bin/run` resolves at runtime (`bin/prebuilt/<os>-<arch>/<tool>`).
 
 `macos-13` and `macos-14` are **not** used: `macos-13` has been retired and
 `macos-14` is deprecated ([runner image list](https://github.com/actions/runner-images#available-images)).
@@ -82,7 +82,7 @@ The workflow needs `contents: write` on `GITHUB_TOKEN` (already declared on the
 
 - Linux binaries link against the runner's glibc (Ubuntu 24.04), so they may not
   start on an older distribution. Pin `ubuntu-22.04` for `linux-x86_64` if that
-  matters; `bin/run.sh` still falls back to compiling from source.
+  matters; `bin/run` still falls back to compiling from source.
 - The committed `bin/prebuilt/*` trees are refreshed by `scripts/build-all.sh`
   for darwin and by this pipeline for release archives; nothing here commits
   them back.

@@ -2,7 +2,7 @@
 # build-c.sh — build every C hook tool for this host.
 #
 # One command, no arguments: compiles each c/*.c with -O2 -std=c11 -Wall -Wextra
-# into bin/prebuilt/<os>-<arch>/<tool>, which bin/run.sh loads first. It also
+# into bin/prebuilt/<os>-<arch>/<tool>, which bin/run loads first. It also
 # refreshes bin/<tool>, the path the manifest named before the dispatcher
 # existed, so either manifest keeps working.
 #
