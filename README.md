@@ -186,9 +186,16 @@ Prefix matching only knows shapes. For a key that leaked once, register its **fi
 40 bits of SHA-256, 10 hex chars, never the key itself:
 
 ```sh
-cat ~/.kimi-code/config.toml | ./bin/run secret_guard fingerprint --secrets \
+# Run from anywhere: the path is the installed plugin, not the current directory.
+cat ~/.kimi-code/config.toml \
+  | ~/.kimi-code/plugins/managed/codebase-memory/bin/run secret_guard fingerprint --secrets \
   > ~/.kimi-code/secret-fingerprints.txt
 ```
+
+From a checkout (not an install), replace that path with `<checkout>/bin/run`. Every other
+`bin/run` example in this file uses the installed absolute path for the same reason: `./bin/run`
+only resolves when the shell's working directory is the plugin root, which is true for hooks and
+false for you.
 
 From then on, any tool call carrying that value is denied as `known-secret`, and `redact` masks
 it, even if the provider changes the key format. `--secrets` restricts the output to values the

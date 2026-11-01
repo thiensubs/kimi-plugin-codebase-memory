@@ -4,6 +4,20 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-11-01
+
+### Fixed
+
+- The README's fingerprint recipe said `./bin/run`, which only resolves when the shell's working
+  directory is the plugin root — true for a hook, false for a reader. It now uses the installed
+  absolute path, states why, and explains the checkout variant.
+
+### Added
+
+- `tests/test-readme.sh`, so the docs cannot drift: every repo path the README names must exist, no
+  shell example may depend on the current directory, the documented `redact` and `fingerprint`
+  pipelines are executed for real, and the install-line counts must equal the manifest.
+
 ## [0.2.3] - 2026-11-01
 
 ### Added
