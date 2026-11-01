@@ -623,6 +623,217 @@ static void scan_context(const char *s, size_t n, hits_t *hits) {
 }
 
 /* ------------------------------------------------------------------ */
+/* known-secret fingerprints (40-bit, SHA-256)                         */
+/* ------------------------------------------------------------------ */
+
+typedef unsigned int u32;
+
+static const u32 K256[64] = {
+    0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u,
+    0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+    0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u, 0xe49b69c1u, 0xefbe4786u,
+    0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+    0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
+    0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+    0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u, 0xa2bfe8a1u, 0xa81a664bu,
+    0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+    0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au,
+    0x5b9cca4fu, 0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+    0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
+};
+
+static u32 ror32(u32 x, int n) { return (x >> n) | (x << (32 - n)); }
+
+static void sha256_block(u32 h[8], const unsigned char *p) {
+    u32 w[64];
+    for (int i = 0; i < 16; i++) {
+        w[i] = ((u32)p[i * 4] << 24) | ((u32)p[i * 4 + 1] << 16) |
+               ((u32)p[i * 4 + 2] << 8) | (u32)p[i * 4 + 3];
+    }
+    for (int i = 16; i < 64; i++) {
+        u32 s0 = ror32(w[i - 15], 7) ^ ror32(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        u32 s1 = ror32(w[i - 2], 17) ^ ror32(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    u32 a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+    for (int i = 0; i < 64; i++) {
+        u32 s1 = ror32(e, 6) ^ ror32(e, 11) ^ ror32(e, 25);
+        u32 ch = (e & f) ^ (~e & g);
+        u32 t1 = hh + s1 + ch + K256[i] + w[i];
+        u32 s0 = ror32(a, 2) ^ ror32(a, 13) ^ ror32(a, 22);
+        u32 maj = (a & b) ^ (a & c) ^ (b & c);
+        u32 t2 = s0 + maj;
+        hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    h[0] += a; h[1] += b; h[2] += c; h[3] += d;
+    h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
+}
+
+static void sha256(const char *s, size_t n, unsigned char out[32]) {
+    u32 h[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
+    size_t i = 0;
+    for (; i + 64 <= n; i += 64) sha256_block(h, (const unsigned char *)s + i);
+    unsigned char tail[128];
+    size_t rem = n - i;
+    if (rem) memcpy(tail, s + i, rem);
+    tail[rem] = 0x80;
+    size_t total = rem + 1;
+    while (total % 64 != 56) tail[total++] = 0;
+    unsigned long long bits = (unsigned long long)n * 8u;
+    for (int k = 0; k < 8; k++) tail[total + k] = (unsigned char)(bits >> (56 - 8 * k));
+    total += 8;
+    for (size_t off = 0; off < total; off += 64) sha256_block(h, tail + off);
+    for (int k = 0; k < 8; k++) {
+        out[k * 4] = (unsigned char)(h[k] >> 24);
+        out[k * 4 + 1] = (unsigned char)(h[k] >> 16);
+        out[k * 4 + 2] = (unsigned char)(h[k] >> 8);
+        out[k * 4 + 3] = (unsigned char)h[k];
+    }
+}
+
+static void fp40(const char *s, size_t n, char out[11]) {
+    unsigned char d[32];
+    static const char hexd[] = "0123456789abcdef";
+    sha256(s, n, d);
+    for (int i = 0; i < 5; i++) {
+        out[i * 2] = hexd[d[i] >> 4];
+        out[i * 2 + 1] = hexd[d[i] & 15];
+    }
+    out[10] = '\0';
+}
+
+#define FP_TOKEN_MIN 16
+#define FP_TOKEN_MAX 512
+#define FP_REG_MAX 8192
+
+static char FP_REG[FP_REG_MAX][11];
+static size_t FP_REG_N;
+static int FP_LOADED;
+
+static const char *fp_registry_path(void) {
+    static char path[1024];
+    const char *env = getenv("SECRET_GUARD_FINGERPRINTS");
+    if (env && *env) return env;
+    const char *root = getenv("KIMI_CODE_HOME");
+    const char *suffix = "";
+    if (!root || !*root) {
+        root = getenv("HOME");
+        suffix = "/.kimi-code";
+    }
+    if (!root || !*root) return NULL;
+    snprintf(path, sizeof path, "%s%s/secret-fingerprints.txt", root, suffix);
+    return path;
+}
+
+static void fp_registry_load(void) {
+    if (FP_LOADED) return;
+    FP_LOADED = 1;
+    const char *p = fp_registry_path();
+    if (!p) return;
+    FILE *f = fopen(p, "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof line, f) && FP_REG_N < FP_REG_MAX) {
+        size_t n = 0;
+        while (line[n] && !isspace((unsigned char)line[n]) && line[n] != '#') n++;
+        if (n != 10) continue;
+        int ok = 1;
+        for (size_t i = 0; i < 10; i++) {
+            if (!is_hex((unsigned char)line[i])) { ok = 0; break; }
+        }
+        if (!ok) continue;
+        for (size_t i = 0; i < 10; i++) {
+            FP_REG[FP_REG_N][i] = (char)tolower((unsigned char)line[i]);
+        }
+        FP_REG[FP_REG_N][10] = '\0';
+        FP_REG_N++;
+    }
+    fclose(f);
+}
+
+static int fp_known(const char *fp) {
+    for (size_t i = 0; i < FP_REG_N; i++) {
+        if (memcmp(FP_REG[i], fp, 10) == 0) return 1;
+    }
+    return 0;
+}
+
+static void scan_fingerprints(const char *s, size_t n, hits_t *hits) {
+    fp_registry_load();
+    if (FP_REG_N == 0) return;
+    size_t i = 0;
+    while (i < n) {
+        if (!is_token_char((unsigned char)s[i])) { i++; continue; }
+        size_t start = i;
+        while (i < n && is_token_char((unsigned char)s[i])) i++;
+        size_t len = i - start;
+        if (len < FP_TOKEN_MIN || len > FP_TOKEN_MAX) continue;
+        char fp[11];
+        fp40(s + start, len, fp);
+        if (fp_known(fp)) hits_add(hits, start, i, "known-secret");
+    }
+}
+
+static void detect_content(const char *s, size_t n, hits_t *hits);
+
+static int fingerprint_mode(int secrets_only) {
+    buf_t in;
+    buf_init(&in);
+    if (!read_stream(stdin, &in) || in.len == 0) {
+        buf_free(&in);
+        return 0;
+    }
+    if (secrets_only) {
+        hits_t hits;
+        hits_init(&hits);
+        detect_content(in.data, in.len, &hits);
+        char seen[512][11];
+        size_t seen_n = 0;
+        for (size_t i = 0; i < hits.n; i++) {
+            size_t start = hits.v[i].start;
+            size_t end = hits.v[i].end;
+            if (end <= start || end > in.len) continue;
+            char fp[11];
+            fp40(in.data + start, end - start, fp);
+            int dup = 0;
+            for (size_t k = 0; k < seen_n; k++) {
+                if (memcmp(seen[k], fp, 10) == 0) { dup = 1; break; }
+            }
+            if (dup) continue;
+            if (seen_n < 512) memcpy(seen[seen_n++], fp, 11);
+            printf("%s\n", fp);
+        }
+        fflush(stdout);
+        hits_free(&hits);
+        buf_free(&in);
+        return 0;
+    }
+    char seen[512][11];
+    size_t seen_n = 0;
+    size_t i = 0;
+    while (i < in.len) {
+        if (!is_token_char((unsigned char)in.data[i])) { i++; continue; }
+        size_t start = i;
+        while (i < in.len && is_token_char((unsigned char)in.data[i])) i++;
+        size_t len = i - start;
+        if (len < FP_TOKEN_MIN || len > FP_TOKEN_MAX) continue;
+        char fp[11];
+        fp40(in.data + start, len, fp);
+        int dup = 0;
+        for (size_t k = 0; k < seen_n; k++) {
+            if (memcmp(seen[k], fp, 10) == 0) { dup = 1; break; }
+        }
+        if (dup) continue;
+        if (seen_n < 512) memcpy(seen[seen_n++], fp, 11);
+        printf("%s\n", fp);
+    }
+    fflush(stdout);
+    buf_free(&in);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* content detection                                                  */
 /* ------------------------------------------------------------------ */
 
@@ -634,6 +845,7 @@ static void detect_content(const char *s, size_t n, hits_t *hits) {
     scan_bearer(s, n, hits);
     scan_url_creds(s, n, hits);
     scan_context(s, n, hits);
+    scan_fingerprints(s, n, hits);
     hits_resolve(hits);
 }
 
@@ -1011,7 +1223,7 @@ static int command_reads_credential(const char *cmd, size_t len) {
     buf[n] = '\0';
 
     const char *pipe = strchr(buf, '|');
-    if (pipe && strstr(pipe, "redact") != NULL) return 0;
+    if (pipe && (strstr(pipe, "redact") != NULL || strstr(pipe, "fingerprint") != NULL)) return 0;
 
     const char *p = buf;
     size_t sp = 0;
@@ -1244,6 +1456,11 @@ static int emit_deny(const char *rule, const char *tool) {
                  "Blocked: credential or private-key path. Do not read .env, key, or "
                  "secret-store files; pipe the content through secret_guard redact if a "
                  "value must be inspected.");
+    } else if (strcmp(rule, "known-secret") == 0) {
+        snprintf(reason, sizeof reason,
+                 "Blocked: this value matches a fingerprint in your secret registry, so it "
+                 "has already leaked once. Rotate it, keep the plaintext out of tool calls, "
+                 "and pipe text through secret_guard redact if you must inspect it.");
     } else {
         snprintf(reason, sizeof reason,
                  "Blocked: tool input contains a value that looks like a %s. Remove the "
@@ -1326,5 +1543,8 @@ static int hook_mode(void) {
 
 int main(int argc, char **argv) {
     if (argc > 1 && strcmp(argv[1], "redact") == 0) return redact_mode();
+    if (argc > 1 && strcmp(argv[1], "fingerprint") == 0) {
+        return fingerprint_mode(argc > 2 && strcmp(argv[2], "--secrets") == 0);
+    }
     return hook_mode();
 }

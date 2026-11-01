@@ -158,6 +158,21 @@ to inspect a credential file's shape without copying its values.
 **Turning it off.** There is no disable variable in 0.2.0. Disable the plugin in `/plugins`.
 The full threat model and the exact rule classes are in [SECURITY.md](SECURITY.md).
 
+### Remembering a key that already leaked
+
+Prefix matching only knows shapes. For a key that leaked once, register its **fingerprint** —
+40 bits of SHA-256, 10 hex chars, never the key itself:
+
+```sh
+cat ~/.kimi-code/config.toml | ./bin/run.sh secret_guard fingerprint --secrets \
+  > ~/.kimi-code/secret-fingerprints.txt
+```
+
+From then on, any tool call carrying that value is denied as `known-secret`, and `redact` masks
+it, even if the provider changes the key format. `--secrets` restricts the output to values the
+pattern rules already flag, so a URL or a model id in the same file is not registered. At 40 bits
+a collision needs ~1.5M registered values; a registry of hundreds is nowhere near it.
+
 ## Install
 
 ```sh

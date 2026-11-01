@@ -4,6 +4,23 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-11-01
+
+### Added
+
+- `secret_guard fingerprint` prints one **40-bit SHA-256 fingerprint** (10 hex chars) per token;
+  `fingerprint --secrets` fingerprints only values the pattern rules flag, so a config file can be
+  registered without matching ordinary URLs or model ids.
+- A known-secret denylist: any tool call carrying a token whose fingerprint is listed in
+  `$KIMI_CODE_HOME/secret-fingerprints.txt` is denied as `known-secret`, and `redact` masks it.
+  A key that already leaked stays blocked even when its shape matches no provider prefix.
+- `bin/install-local.sh` reinstalls this checkout into a running server without putting the bearer
+  token in a shell history or a tool call.
+
+### Changed
+
+- A credential file may also be piped through `fingerprint`, not only `redact`, without a block.
+
 ## [0.2.0] - 2026-11-01
 
 ### Added

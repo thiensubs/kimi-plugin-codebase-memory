@@ -180,3 +180,27 @@ Bugs in the graph server itself belong at https://github.com/DeusData/codebase-m
 ## Supported versions
 
 0.2.x receives security fixes. 0.1.0 predates the guard and has none.
+
+## Known-secret fingerprints (0.2.1+)
+
+Prefix rules only catch shapes. The fingerprint registry catches *one specific value*:
+
+- `secret_guard fingerprint` → 10-hex SHA-256 prefix (40 bits) per token of 16+ chars.
+- `secret_guard fingerprint --secrets` → same, but only for values the pattern rules flag, so a
+  config file can be registered without matching URLs, model ids or paths.
+- Registry: `$KIMI_CODE_HOME/secret-fingerprints.txt` (default `~/.kimi-code/`), one fingerprint
+  per line, `#` comments and blank lines ignored, case-insensitive. Override the path with
+  `SECRET_GUARD_FINGERPRINTS`.
+- A hit denies the call as `known-secret` and `redact` masks the value as
+  `[REDACTED:known-secret]`. The registry stores no plaintext, and neither the log nor the deny
+  message ever echoes the secret.
+
+Why 40 bits: collision expectation is `n² / (2 · 2^40)`. A 1,000-entry registry sits at ~4.5×10⁻⁷;
+the first expected collision arrives at ~1.5M entries. 32 bits would collide at ~93k and would also
+make the registry twice as guessable; 64 bits would double the file size for a problem this code
+does not have.
+
+Known limits of this class: only tokens of 16+ characters from `[A-Za-z0-9_-]` are fingerprinted,
+so a key with `.` or `/` in it is missed; a fingerprint is a *presence* check, not a proof of
+identity (a deliberate 2^40 search could collide, which no realistic attacker will spend on a
+local file).
