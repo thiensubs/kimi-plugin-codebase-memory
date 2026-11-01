@@ -28,7 +28,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define MAX_INPUT (32u * 1024u * 1024u)
+#define SG_MAX_INPUT (32u * 1024u * 1024u)
 #define MAX_TOKENS 256
 
 /* ------------------------------------------------------------------ */
@@ -91,7 +91,7 @@ static int read_stream(FILE *in, buf_t *b) {
     char chunk[65536];
     size_t got;
     while ((got = fread(chunk, 1, sizeof chunk, in)) > 0) {
-        if (b->len + got > MAX_INPUT) return 0;
+        if (b->len + got > SG_MAX_INPUT) return 0;
         if (!buf_add(b, chunk, got)) return 0;
     }
     return buf_terminate(b);

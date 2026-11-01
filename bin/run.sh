@@ -106,7 +106,7 @@ if [ -z "$reason" ]; then
     # A cached binary wins unless the source is newer (an edited c/<tool>.c
     # must not keep running a stale build). With no source at all, any cached
     # binary is still good. No mkdir on this path: it is the per-prompt one.
-    if [ -x "$out" ] && { [ ! -f "$src" ] || [ ! "$src" -nt "$out" ]; }; then
+    if [ -x "$out" ] && { [ ! -f "$src" ] || [ -z "$(find "$src" -newer "$out" 2>/dev/null)" ]; }; then
       exec "$out" "$@"
     fi
 
