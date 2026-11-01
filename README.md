@@ -12,6 +12,68 @@ Three pieces, one install:
 | **Nudge** | `bin/cbm_nudge`, a ~58 ms C `UserPromptSubmit` hook that reminds the agent to query the graph on structure questions |
 | **Guard** | `bin/secret_guard`, a C `PreToolUse` hook that blocks credential reads and plaintext provider keys, with a `redact` filter for the cases where a value must be inspected |
 
+## How it works, in one picture
+
+```
+                        one turn, two hooks
+
+  your prompt ──► cbm_nudge ─────► one reminder in context (structure questions only)
+                     ~58 ms             no network, no daemon, no model call
+                       │
+                       ▼
+                   model thinks
+                       │
+                       ▼  tool call
+              ┌──────────────────┐
+              │  secret_guard    │◄── inspects the *call*, never the tool result
+              │  (PreToolUse)    │
+              └───┬──────────┬───┘
+ credential path or│          │nothing suspicious
+ a key inside the  │          │
+ call              │          │
+             ┌─────▼──┐  ┌────▼──────────────┐
+             │  deny  │  │ the tool runs     │
+             │ exit 2 │  │ graph / file / …  │
+             └────────┘  └───────────────────┘
+```
+
+**Why two hooks instead of a proxy:** Kimi Code already owns the loop. The plugin only
+answers two questions the loop asks anyway — *"should I remind the model about the graph?"*
+and *"may this tool call run?"* — in ~60 ms of C, with no daemon to crash and no network
+hop to time out.
+
+### The three jobs
+
+| Job | File | Trigger | Cost | Verdict |
+| --- | --- | --- | --- | --- |
+| Graph | `bin/codebase-memory-mcp.sh` (MCP `graph`) | every graph tool call | upstream server | symbols, callers, impact — instead of grepping |
+| Nudge | `c/cbm_nudge.c` | `UserPromptSubmit` | ~58 ms | one short reminder, or silence |
+| Guard | `c/secret_guard.c` | `PreToolUse` | ~60 ms | exit 0 (allow) or exit 2 + a reason |
+
+### What a blocked call looks like
+
+```
+secret_guard: blocked credential-path (tool=Read)
+{"hookSpecificOutput":{"permissionDecision":"deny",
+ "permissionDecisionReason":"Blocked: credential or private-key path. …"}}
+```
+
+The reason is written back into the conversation, so the model can choose another route
+instead of retrying blindly.
+
+### Footprint
+
+| Platform | `cbm_nudge` | `secret_guard` | release tarball |
+| --- | --- | --- | --- |
+| macOS x86_64 | 17.7 KB | 31.1 KB | 74.3 KB |
+| macOS arm64 | 51.0 KB | 52.1 KB | 75.1 KB |
+| Linux x86_64 | 17.2 KB | 42.8 KB | 78.9 KB |
+| Linux arm64 | 71.8 KB | 72.8 KB | 80.0 KB |
+
+Both hooks are C11 with no third-party code. `strip -x` saves under 2%, so releases ship
+with symbols on purpose — a crash backtrace stays readable. The full four-platform plugin
+zip is 145 KB.
+
 ## 1. The graph
 
 The plugin registers the upstream MCP server as `graph` (stdio, started by
