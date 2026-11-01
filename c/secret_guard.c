@@ -28,6 +28,14 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+/* MinGW declares mkdir(const char *) with one argument; POSIX wants two. */
+#ifdef _WIN32
+#include <direct.h>
+#define sg_mkdir(p) _mkdir(p)
+#else
+#define sg_mkdir(p) mkdir((p), 0700)
+#endif
+
 #define SG_MAX_INPUT (32u * 1024u * 1024u)
 #define MAX_TOKENS 256
 
@@ -1405,18 +1413,18 @@ static void inspect_arguments(const char *v, const char *end, walk_ctx *ctx) {
 static void ensure_dir(const char *path) {
     struct stat st;
     if (stat(path, &st) == 0) return;
-    if (mkdir(path, 0700) == 0) return;
+    if (sg_mkdir(path) == 0) return;
     if (errno != ENOENT) return;
     char parent[1024];
     snprintf(parent, sizeof parent, "%s", path);
     char *slash = strrchr(parent, '/');
     if (slash && slash != parent) {
         *slash = '\0';
-        if (mkdir(parent, 0700) != 0) {
+        if (sg_mkdir(parent) != 0) {
             /* keep going: fopen below simply fails and logging is best effort */
         }
     }
-    if (mkdir(path, 0700) != 0) {
+    if (sg_mkdir(path) != 0) {
         /* best effort */
     }
 }
