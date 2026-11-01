@@ -111,7 +111,8 @@ start on Windows; `bin/codebase-memory-mcp.sh` remains for launches with a minim
 The plugin ships the tools and the workflow, not an index. Index each repository you work in:
 
 ```sh
-codebase-memory-mcp cli index_repository --repo_path /path/to/repo --mode moderate --persistence true
+# index the repository you are in, once, and keep the graph on disk
+codebase-memory-mcp cli index_repository --repo-path . --mode moderate --persistence true
 ```
 
 or run `/codebase-memory:index` inside a session. Index the repository, not a whole
@@ -168,7 +169,9 @@ single-character-class values, and any command piped through the redactor.
 secret with `[REDACTED:<label>]`, always exiting 0:
 
 ```sh
-cat ~/.kimi-code/config.toml | ~/.kimi-code/plugins/managed/codebase-memory/bin/run secret_guard redact
+# show a credential file with every secret masked
+PLUGIN=~/.kimi-code/plugins/managed/codebase-memory
+cat ~/.kimi-code/config.toml | "$PLUGIN/bin/run" secret_guard redact
 ```
 
 A command containing `| … redact` is allowed through the guard, so this is the supported way
@@ -186,16 +189,15 @@ Prefix matching only knows shapes. For a key that leaked once, register its **fi
 40 bits of SHA-256, 10 hex chars, never the key itself:
 
 ```sh
-# Run from anywhere: the path is the installed plugin, not the current directory.
-cat ~/.kimi-code/config.toml \
-  | ~/.kimi-code/plugins/managed/codebase-memory/bin/run secret_guard fingerprint --secrets \
-  > ~/.kimi-code/secret-fingerprints.txt
+# remember the keys that already leaked: fingerprints only, never plaintext
+PLUGIN=~/.kimi-code/plugins/managed/codebase-memory
+R=~/.kimi-code/secret-fingerprints.txt
+cat ~/.kimi-code/config.toml | "$PLUGIN/bin/run" secret_guard fingerprint --secrets > "$R"
 ```
 
-From a checkout (not an install), replace that path with `<checkout>/bin/run`. Every other
-`bin/run` example in this file uses the installed absolute path for the same reason: `./bin/run`
-only resolves when the shell's working directory is the plugin root, which is true for hooks and
-false for you.
+`PLUGIN` is the installed plugin, not your working directory: `./bin/run` only resolves when the
+shell's cwd is the plugin root, which is true for a hook and false for you. From a checkout, set
+`PLUGIN=<checkout>` instead.
 
 From then on, any tool call carrying that value is denied as `known-secret`, and `redact` masks
 it, even if the provider changes the key format. `--secrets` restricts the output to values the
@@ -222,7 +224,7 @@ usable for this on macOS: Apple clang prints `detect_leaks is not supported on t
 
 ## Install
 
-```sh
+```text
 # from GitHub
 /plugins install https://github.com/thiensubs/kimi-plugin-codebase-memory
 

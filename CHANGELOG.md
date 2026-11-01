@@ -4,6 +4,19 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5] - 2026-11-01
+
+### Changed
+
+- Every shell example in the README is now one phone-copyable block: a `#` caption first, no line
+  over 96 characters, no `\` continuations, no placeholders. Long paths collapsed into `PLUGIN`
+  and `R` variables so each real command fits one line.
+
+### Added
+
+- `tests/test-readme.sh` executes the documented blocks verbatim and fails on any line a phone copy
+  would break (length, continuation, placeholder, missing caption).
+
 ## [0.2.4] - 2026-11-01
 
 ### Fixed

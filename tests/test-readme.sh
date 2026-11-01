@@ -71,41 +71,44 @@ PY
 key="nvapi-""$(printf 'Aa0-%.0s' 1 2 3 4 5 6 7 8 9 10)"
 printf '[provider]\napi_key = "%s"\nmodel = "fast"\n' "$key" > "$work/config.toml"
 
-# Pull the real command lines out of the README, then point them at the temp
-# config and this checkout instead of the installed copy.
-snippet=$(python3 - "$readme" <<'PY'
+# Pull whole fenced blocks out of the README, drop comment lines, point them at
+# the temp config and this checkout, then run them exactly as documented.
+block_for() {
+  python3 - "$readme" "$1" <<'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
+needle = sys.argv[2]
 for block in re.findall(r"```(?:sh|bash)\n(.*?)```", text, re.S):
-    body = re.sub(r"^\s*#.*\n", "", block, flags=re.M)
-    body = body.replace("\\\n", " ")
-    for line in body.splitlines():
-        if "secret_guard fingerprint --secrets" in line and "config.toml" in line:
-            print(line.strip())
-            raise SystemExit
+    if needle not in block:
+        continue
+    print("\n".join(ln for ln in block.splitlines() if not ln.strip().startswith("#")))
+    raise SystemExit
 PY
-)
-if [ -z "$snippet" ]; then
-  bad "README still has a fingerprint registration example"
-else
-  cmd=${snippet//\~\/\.kimi-code\/config.toml/$work/config.toml}
-  cmd=${cmd//\~\/\.kimi-code\/plugins\/managed\/codebase-memory/$root}
-  cmd=${cmd//\~\/\.kimi-code\/secret-fingerprints.txt/$work/fp.txt}
-  out=$(eval "$cmd" 2>&1)
-  rc=$?
-  if [ "$rc" != "0" ]; then
-    bad "documented fingerprint pipeline exits 0" "rc=$rc ${out:0:120}"
-  elif [ -s "$work/fp.txt" ] && grep -qvE '^[0-9a-f]{10}$' "$work/fp.txt"; then
+}
+
+run_block() {
+  local body
+  body=$(block_for "$1")
+  [ -z "$body" ] && return 1
+  body=${body//\~\/\.kimi-code\/config.toml/$work/config.toml}
+  body=${body//\~\/\.kimi-code\/plugins\/managed\/codebase-memory/$root}
+  body=${body//\~\/\.kimi-code\/secret-fingerprints.txt/$2}
+  eval "$body"
+}
+
+if run_block "secret_guard fingerprint --secrets" "$work/fp.txt" >/dev/null 2>"$work/fp.err"; then
+  if [ ! -s "$work/fp.txt" ]; then
+    bad "documented fingerprint pipeline produced at least one line"
+  elif grep -qvE '^[0-9a-f]{10}$' "$work/fp.txt"; then
     bad "fingerprint file holds only 10-hex lines" "$(head -2 "$work/fp.txt")"
-  elif [ ! -s "$work/fp.txt" ]; then
-    bad "fingerprint pipeline produced at least one line"
   else
     ok
   fi
+else
+  bad "documented fingerprint pipeline exits 0" "$(head -c 120 "$work/fp.err")"
 fi
 
-redact_cmd="cat $work/config.toml | $root/bin/run secret_guard redact"
-redacted=$(eval "$redact_cmd" 2>&1)
+redacted=$(run_block "secret_guard redact" /dev/null 2>&1)
 case "$redacted" in
   *'[REDACTED:'*) ok ;;
   *) bad "documented redact pipeline masks the value" "${redacted:0:120}" ;;
@@ -114,6 +117,28 @@ case "$redacted" in
   *"$key"*) bad "redact output must not contain the raw key" ;;
   *) ok ;;
 esac
+
+# -- 6. shell blocks stay copy-pasteable on a phone -----------------------
+problems=$(python3 - "$readme" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+out = []
+for i, block in enumerate(re.findall(r"```sh\n(.*?)```", text, re.S), 1):
+    lines = block.splitlines()
+    if not lines or not lines[0].strip().startswith("#"):
+        out.append("block %d: first line is not a # caption" % i)
+    for ln in lines:
+        if len(ln) > 96:
+            out.append("block %d: %d chars > 96" % (i, len(ln)))
+        if ln.rstrip().endswith("\\"):
+            out.append("block %d: line continuation breaks mobile copy" % i)
+        if "<" in ln and ">" in ln:
+            out.append("block %d: placeholder in a copy-paste block" % i)
+print("\n".join(out))
+PY
+)
+[ -z "$problems" ] && ok || bad "shell blocks are phone-copyable" "$problems"
+
 
 # -- 4. the install-line counts match the manifest -------------------------
 counts=$(python3 - "$root" <<'PY'
@@ -130,7 +155,7 @@ if grep -qF "$line" "$readme"; then ok; else bad "README install line matches th
 
 # -- 5. no stale command names survive in the docs ------------------------
 if grep -qF 'bin/run.sh' "$readme"; then bad "README still mentions bin/run.sh"; else ok; fi
-if grep -qF 'only resolves when the shell' "$readme"; then ok
+if grep -qF 'only resolves when the' "$readme"; then ok
 else bad "README explains why ./bin/run needs the plugin root"; fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
