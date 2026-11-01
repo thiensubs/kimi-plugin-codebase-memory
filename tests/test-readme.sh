@@ -123,7 +123,7 @@ problems=$(python3 - "$readme" <<'PY'
 import pathlib, re, sys
 text = pathlib.Path(sys.argv[1]).read_text()
 out = []
-for i, block in enumerate(re.findall(r"```sh\n(.*?)```", text, re.S), 1):
+for i, block in enumerate(re.findall(r"```(?:sh|text)\n(.*?)```", text, re.S), 1):
     lines = block.splitlines()
     if not lines or not lines[0].strip().startswith("#"):
         out.append("block %d: first line is not a # caption" % i)

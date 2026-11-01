@@ -4,6 +4,18 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6] - 2026-11-01
+
+### Added
+
+- README section "Try it": three example prompts as one copyable `text` block, so a reader on a
+  phone can paste a prompt into a new session instead of retyping it.
+
+### Changed
+
+- The phone-copy rules in `tests/test-readme.sh` now cover `text` blocks too (caption first line,
+  no line over 96 characters, no continuation, no placeholder), not just `sh`.
+
 ## [0.2.5] - 2026-11-01
 
 ### Changed

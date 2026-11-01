@@ -33,6 +33,19 @@ Nothing else is installed: no daemon, no background service, no `node_modules`. 
 means it came from a folder or zip on this machine instead of from a marketplace entry (`Curated`)
 or from Kimi's own catalog (`Official`).
 
+## Try it — copy one line, paste it into a new session
+
+```text
+# paste any one of these into a fresh session
+who calls the function that loads config in this repository?
+where is the request size limit enforced?
+what are the entry points here, and which module owns the graph?
+```
+
+If the answers arrive as `trace_path` / `search_graph` output instead of grep hits, the skill and
+the MCP server are wired correctly. If they arrive as file listings, the skill did not load — check
+`/plugins info codebase-memory`.
+
 ## How it works, in one picture
 
 ```
