@@ -1,0 +1,163 @@
+#!/bin/sh
+# bin/run.sh <tool> [args...] — run a plugin hook binary, portably.
+#
+# Lookup order:
+#   1. bin/prebuilt/<os>-<arch>/<tool>   shipped binary, no compiler needed
+#   2. ${XDG_CACHE_HOME:-$HOME/.cache}/kimi-plugin-codebase-memory/<os>-<arch>/<tool>,
+#      compiled once from c/<tool>.c with cc or clang
+#   3. one line in $KIMI_CODE_HOME/logs/<tool>.log, then exit 0
+#
+# For a Kimi Code hook, exit 0 means "allow" and exit 2 means "block", so every
+# failure path here exits 0: a missing or unbuildable binary must never block a
+# prompt. The script itself prints nothing; only the hook binary it execs may.
+#
+# POSIX sh only (no arrays, no [[ ]], no local), no network, no bashisms: it
+# runs on every UserPromptSubmit and has to stay in the low milliseconds.
+set -u
+
+# -- tool name ---------------------------------------------------------
+# Only [A-Za-z0-9_-]: the name becomes a path component below.
+[ "$#" -ge 1 ] || exit 0
+tool=$1
+shift
+
+case $tool in
+  ''|.*|*[!A-Za-z0-9_-]*) exit 0 ;;
+esac
+
+# -- plugin root from this script's own path ---------------------------
+self=$0
+case $self in
+  */*) ;;
+  *)
+    resolved=$(command -v "$self" 2>/dev/null) || exit 0
+    [ -n "$resolved" ] || exit 0
+    self=$resolved
+    ;;
+esac
+
+# A symlinked bin/run.sh (some installers link instead of copy) must still
+# resolve the plugin root, so follow up to 8 links.
+links=0
+while [ -L "$self" ] && [ "$links" -lt 8 ]; do
+  target=$(readlink "$self" 2>/dev/null) || break
+  case $target in
+    /*) self=$target ;;
+    *) case $self in
+         */*) self=${self%/*}/$target ;;
+         *) self=$target ;;
+       esac ;;
+  esac
+  links=$((links + 1))
+done
+
+case $self in
+  */*) bindir=${self%/*} ;;
+  *) bindir=. ;;
+esac
+[ -n "$bindir" ] || bindir=/
+# The operand always contains a slash, so POSIX cd never consults CDPATH here.
+root=$(cd -P "$bindir/.." 2>/dev/null && pwd -P) || exit 0
+
+# -- platform ----------------------------------------------------------
+# One uname call instead of two; the mapping is explicit so an unknown
+# platform fails open instead of guessing at a prebuilt directory.
+platform=$(uname -sm 2>/dev/null) || platform=
+case $platform in
+  "Darwin x86_64") plat=darwin-x86_64 ;;
+  "Darwin arm64"|"Darwin arm64e") plat=darwin-arm64 ;;
+  "Linux x86_64") plat=linux-x86_64 ;;
+  "Linux aarch64"|"Linux arm64"|"Linux arm64e") plat=linux-arm64 ;;
+  *) plat= ;;
+esac
+
+# -- 1. shipped prebuilt ----------------------------------------------
+reason=
+if [ -n "$plat" ]; then
+  prebuilt=$root/bin/prebuilt/$plat/$tool
+  if [ -x "$prebuilt" ]; then
+    exec "$prebuilt" "$@"
+  fi
+else
+  reason="unsupported platform: ${platform:-uname unavailable}"
+fi
+
+# -- 2. cached compile of c/<tool>.c ----------------------------------
+src=$root/c/$tool.c
+if [ -z "$reason" ]; then
+  if [ -n "${XDG_CACHE_HOME:-}" ]; then
+    cache=$XDG_CACHE_HOME
+  elif [ -n "${HOME:-}" ]; then
+    cache=$HOME/.cache
+  else
+    cache=
+  fi
+
+  outdir=
+  if [ -n "$cache" ]; then
+    outdir=$cache/kimi-plugin-codebase-memory/$plat
+  fi
+
+  if [ -z "$outdir" ]; then
+    reason="cache directory unavailable: ${cache:-<no XDG_CACHE_HOME or HOME>}"
+  else
+    out=$outdir/$tool
+
+    # A cached binary wins unless the source is newer (an edited c/<tool>.c
+    # must not keep running a stale build). With no source at all, any cached
+    # binary is still good. No mkdir on this path: it is the per-prompt one.
+    if [ -x "$out" ] && { [ ! -f "$src" ] || [ ! "$src" -nt "$out" ]; }; then
+      exec "$out" "$@"
+    fi
+
+    if [ ! -f "$src" ]; then
+      reason="no prebuilt for $plat and no $src"
+    elif ! mkdir -p "$outdir" 2>/dev/null; then
+      reason="cache directory not writable: $outdir"
+    else
+      cc=
+      # PATH only: a hook whose PATH was restricted on purpose must not reach
+      # around it to compile and run code from an absolute path.
+      for candidate in "${CC:-}" cc clang; do
+        [ -n "$candidate" ] || continue
+        if command -v "$candidate" >/dev/null 2>&1; then
+          cc=$candidate
+          break
+        fi
+      done
+
+      if [ -z "$cc" ]; then
+        reason="no C compiler found (CC, cc, clang)"
+      else
+        # Compile beside the target and rename, so a concurrent prompt either
+        # sees the old binary or a complete new one, never a half-written file.
+        tmp=$out.$$.tmp
+        if "$cc" -O2 -std=c11 -Wall -Wextra "$src" -o "$tmp" >/dev/null 2>&1 &&
+           [ -x "$tmp" ] && mv -f "$tmp" "$out" 2>/dev/null; then
+          exec "$out" "$@"
+        fi
+        rm -f "$tmp" 2>/dev/null
+        reason="compile failed: $cc -O2 -std=c11 -Wall -Wextra $src"
+      fi
+    fi
+  fi
+fi
+
+# -- 3. fail open, one log line ---------------------------------------
+logpath=
+if [ -n "${KIMI_CODE_HOME:-}" ]; then
+  logpath=$KIMI_CODE_HOME/logs
+elif [ -n "${HOME:-}" ]; then
+  logpath=$HOME/.kimi-code/logs
+fi
+
+if [ -n "$logpath" ]; then
+  name=$(printf '%s' "$tool" | tr '_' '-' 2>/dev/null)
+  [ -n "$name" ] || name=$tool
+  mkdir -p "$logpath" 2>/dev/null &&
+    printf '%s run.sh %s (%s): %s\n' \
+      "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" "$tool" "$plat" "$reason" \
+      >>"$logpath/$name.log" 2>/dev/null
+fi
+
+exit 0

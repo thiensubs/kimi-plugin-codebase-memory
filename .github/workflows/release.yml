@@ -1,0 +1,240 @@
+name: Release
+
+# Publishing is triggered by a tag, never by a branch push.
+on:
+  push:
+    tags: ["v*"]
+
+# Least privilege: the build matrix only reads. The package job is the single
+# place that gets contents: write, and it uses the built-in GITHUB_TOKEN.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PLUGIN_ID: codebase-memory
+  # Stable asset name, so the marketplace can point at one URL forever:
+  #   https://github.com/<owner>/<repo>/releases/latest/download/codebase-memory-plugin.zip
+  PLUGIN_ARCHIVE: codebase-memory-plugin.zip
+  PLATFORMS: linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64
+
+jobs:
+  build:
+    name: build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Pinned labels, never `-latest`: macos-13 is retired and macos-14 is
+          # deprecated, so the current x64 macOS image is macos-15-intel and the
+          # arm64 one is macos-15.
+          - platform: linux-x86_64
+            runs-on: ubuntu-24.04
+          - platform: linux-arm64
+            runs-on: ubuntu-24.04-arm
+          - platform: darwin-x86_64
+            runs-on: macos-15-intel
+          - platform: darwin-arm64
+            runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          cc --version
+          clang --version || true
+          uname -a
+
+      - name: Build C hooks
+        run: ./.github/scripts/build-hooks.sh
+
+      # Never publish a binary that has not been tested on its own platform.
+      - name: Test
+        env:
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+        run: ./.github/scripts/run-tests.sh
+
+      - name: Upload prebuilt binaries
+        uses: actions/upload-artifact@v4
+        with:
+          # Only this platform's directory: bin/prebuilt/ also holds committed
+          # binaries, and shipping those from a foreign runner would let a stale
+          # copy of another platform ride into the release.
+          name: prebuilt-${{ matrix.platform }}
+          path: bin/prebuilt/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: package
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # `git archive HEAD` reads the tagged commit; depth 1 is enough.
+          fetch-depth: 1
+
+      - name: Collect prebuilt binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: prebuilt-*
+          path: .prebuilt
+          # One directory per artifact: .prebuilt/prebuilt-<platform>/. Merging
+          # would flatten every platform into one directory of same-named files.
+
+      - name: Verify all platforms and architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          command -v file >/dev/null || { echo "::error::file(1) is required"; exit 1; }
+
+          sources=(c/*.c)
+          [ ${#sources[@]} -gt 0 ] || { echo "::error::no C sources in c/"; exit 1; }
+
+          for p in $PLATFORMS; do
+            dir=".prebuilt/prebuilt-$p"
+            [ -d "$dir" ] || { echo "::error::artifact for $p is missing ($dir)"; exit 1; }
+            case "$p" in
+              darwin-x86_64) want=x86_64 ;;
+              darwin-arm64) want=arm64 ;;
+              linux-x86_64) want=x86-64 ;;
+              linux-arm64) want=aarch64 ;;
+            esac
+            for src in "${sources[@]}"; do
+              name=$(basename "$src" .c)
+              bin="$dir/$name"
+              [ -f "$bin" ] || { echo "::error::$bin is missing"; exit 1; }
+              if ! file "$bin" | grep -E -- "$want" >/dev/null; then
+                echo "::error::$bin is not $p"
+                file "$bin"
+                exit 1
+              fi
+            done
+            echo "ok: $p -> $(ls -1 "$dir" | tr '\n' ' ')"
+          done
+          find .prebuilt -type f -exec ls -l {} +
+
+      - name: Assemble plugin tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v zip >/dev/null || { echo "::error::zip(1) is required to build the archive"; exit 1; }
+
+          stage="$RUNNER_TEMP/plugin"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+
+          # Tracked files only: no .git, no .tmp, no runner leftovers.
+          git archive HEAD | tar -xf - -C "$stage"
+          rm -rf "$stage/.github"
+
+          mkdir -p "$stage/bin/prebuilt"
+          for p in $PLATFORMS; do
+            mkdir -p "$stage/bin/prebuilt/$p"
+            cp -R ".prebuilt/prebuilt-$p/." "$stage/bin/prebuilt/$p/"
+          done
+          # Artifacts do not preserve the executable bit; the installer only
+          # restores what the zip records, so set it before archiving.
+          find "$stage/bin/prebuilt" -type f -exec chmod 755 {} +
+          chmod 755 "$stage"/bin/* || true
+
+          version=$(python3 -c 'import json;print(json.load(open("kimi.plugin.json"))["version"])')
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::kimi.plugin.json version '$version' does not match tag 'v$tag'"
+            exit 1
+          fi
+          [ -f "$stage/kimi.plugin.json" ] || { echo "::error::manifest missing from plugin tree"; exit 1; }
+
+          {
+            echo "STAGE=$stage"
+            echo "PLUGIN_VERSION=$version"
+          } >> "$GITHUB_ENV"
+
+          echo "--- plugin tree ---"
+          find "$stage" -maxdepth 3 | sed "s|$stage|.|" | sort
+
+      - name: Build archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p dist
+          archive="dist/$PLUGIN_ARCHIVE"
+
+          # One archive for every platform: manifest at the root, plus all four
+          # bin/prebuilt/<os>-<arch>/ trees.
+          ( cd "$STAGE" && zip -q -r -X "$GITHUB_WORKSPACE/$archive" . )
+          unzip -t "$archive" >/dev/null
+
+          # One listing, grepped as a file. `unzip -l | grep -q` is wrong under
+          # pipefail: -q exits on the first match, unzip dies of SIGPIPE, and
+          # the pipeline reports 141 even though the grep succeeded.
+          listing="$RUNNER_TEMP/zip-list.txt"
+          unzip -l "$archive" > "$listing"
+
+          # The installer reads kimi.plugin.json from the archive root (or from a
+          # single top-level directory); prove the flattening did not change.
+          grep -qE '[[:space:]]kimi\.plugin\.json$' "$listing" \
+            || { echo "::error::kimi.plugin.json is not at the archive root"; head -20 "$listing"; exit 1; }
+
+          # Every source must exist as a binary for every platform inside it.
+          for src in c/*.c; do
+            name=$(basename "$src" .c)
+            for p in $PLATFORMS; do
+              grep -q " bin/prebuilt/$p/$name\$" "$listing" \
+                || { echo "::error::$archive is missing bin/prebuilt/$p/$name"; exit 1; }
+            done
+          done
+          echo "archive contains every prebuilt binary for $PLATFORMS"
+
+          # Per-platform tarballs: the same plugin with only that platform's
+          # prebuilt directory, so the download is a fraction of the size.
+          # Pruned by copy, not by tar --exclude, so no pattern-matching rules
+          # of a particular tar implementation decide what ships.
+          for p in $PLATFORMS; do
+            work="$RUNNER_TEMP/tar-$p"
+            rm -rf "$work"
+            cp -R "$STAGE" "$work"
+            for other in $PLATFORMS; do
+              [ "$other" = "$p" ] || rm -rf "$work/bin/prebuilt/$other"
+            done
+            tarball="dist/${PLUGIN_ID}-${PLUGIN_VERSION}-${p}.tar.gz"
+            tar -czf "$tarball" -C "$work" .
+            rm -rf "$work"
+            echo "built $tarball ($(du -h "$tarball" | cut -f1))"
+          done
+
+          ( cd dist && sha256sum ./* > SHA256SUMS && cat SHA256SUMS )
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag exists — uploading with --clobber"
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* \
+              --title "$tag" \
+              --generate-notes \
+              --verify-tag
+          fi
+          gh release view "$tag" --json assets --jq '.assets[].name'

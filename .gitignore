@@ -1,0 +1,19 @@
+# Scratch space used by the test suite and while developing.
+.tmp/
+
+# Compiler output. Prebuilts under bin/prebuilt/<os>-<arch>/ are committed on
+# purpose: a few tens of KB per platform buys a compiler-free, offline install.
+*.o
+*.obj
+*.dSYM/
+
+# Editor and OS noise.
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Local logs and index state, if the plugin directory itself is ever indexed.
+*.log
+.codebase-memory/

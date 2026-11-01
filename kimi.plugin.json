@@ -1,0 +1,50 @@
+{
+  "name": "codebase-memory",
+  "version": "0.2.0",
+  "description": "Graph-first code discovery for Kimi Code: the codebase-memory-mcp knowledge graph plus the workflow rules that make the agent actually use it, with a PreToolUse guard that keeps credential files out of the transcript and out of the index.",
+  "keywords": [
+    "codebase",
+    "graph",
+    "mcp",
+    "discovery",
+    "architecture",
+    "callers",
+    "impact",
+    "secrets",
+    "redaction",
+    "credential-guard"
+  ],
+  "license": "MIT",
+  "author": "thiensubs",
+  "homepage": "https://github.com/thiensubs/kimi-plugin-codebase-memory",
+  "skills": "./skills/",
+  "sessionStart": {
+    "skill": "using-codebase-memory"
+  },
+  "systemPromptPath": "./SYSTEM.md",
+  "mcpServers": {
+    "graph": {
+      "command": "./bin/codebase-memory-mcp.sh"
+    }
+  },
+  "commands": "./commands/",
+  "hooks": [
+    {
+      "event": "UserPromptSubmit",
+      "command": "./bin/run.sh cbm_nudge",
+      "timeout": 3
+    },
+    {
+      "event": "PreToolUse",
+      "command": "./bin/run.sh secret_guard",
+      "timeout": 3
+    }
+  ],
+  "interface": {
+    "displayName": "Codebase Memory",
+    "shortDescription": "Find symbols, callers and architecture with a knowledge graph, and keep credential files out of the transcript.",
+    "longDescription": "Adds a codebase knowledge graph to Kimi Code: symbols, call chains, imports, routes, layers and impact analysis served from an indexed graph, together with the discovery rules that keep the agent on the graph for structural questions and on text search only for literals. A PreToolUse secret guard blocks Bash, Read and search calls that would print a credential file such as ~/.kimi-code/config.toml, ~/.ssh/*, .env or *.pem, masks every detected secret as [REDACTED:<provider>] when you pipe text through its redact mode, and the /codebase-memory:audit-secrets command lists credential-looking paths in the index so they can be excluded with .cbmignore. Upstream tool: DeusData/codebase-memory-mcp.",
+    "developerName": "thiensubs",
+    "websiteURL": "https://github.com/thiensubs/kimi-plugin-codebase-memory"
+  }
+}

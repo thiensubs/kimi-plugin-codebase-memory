@@ -1,0 +1,71 @@
+name: CI
+
+# Tag pushes are deliberately excluded: `branches` alone ignores tag refs, and
+# release.yml owns `v*` tags. Without this, every tag would run the matrix twice.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Runner labels are pinned, never `-latest`: macos-13 is retired and
+          # macos-14 is deprecated, so the current x64 macOS image is
+          # macos-15-intel and the arm64 one is macos-15.
+          - platform: linux-x86_64
+            runs-on: ubuntu-24.04
+          - platform: linux-arm64
+            runs-on: ubuntu-24.04-arm
+          - platform: darwin-x86_64
+            runs-on: macos-15-intel
+          - platform: darwin-arm64
+            runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          cc --version
+          clang --version || true
+          uname -a
+
+      - name: Build C hooks
+        run: ./.github/scripts/build-hooks.sh
+
+      # .github/scripts/run-tests.sh runs tests/run-tests.sh when it exists and
+      # each tests/test-*.sh otherwise; a checkout with no tests passes with a
+      # notice, so this stays green while the suite lands in parallel.
+      - name: Test
+        env:
+          # The hook binary appends parse-failure diagnostics under
+          # $KIMI_CODE_HOME/logs. Point it at the runner's temp dir so it can
+          # never touch a real home directory.
+          KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
+        run: ./.github/scripts/run-tests.sh
+
+      - name: Upload prebuilt binaries
+        uses: actions/upload-artifact@v4
+        with:
+          # Only this platform's directory: bin/prebuilt/ also holds committed
+          # binaries, and those must never be mistaken for this runner's build.
+          name: prebuilt-${{ matrix.platform }}
+          path: bin/prebuilt/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 14
