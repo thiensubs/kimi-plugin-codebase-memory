@@ -244,7 +244,7 @@ jobs:
           for src in c/*.c; do
             name=$(basename "$src" .c)
             for p in $PLATFORMS; do
-              grep -q " bin/prebuilt/$p/$name(\.exe)?\$" "$listing" \
+              grep -qE " bin/prebuilt/$p/$name(\.exe)?\$" "$listing" \
                 || { echo "::error::$archive is missing bin/prebuilt/$p/$name"; exit 1; }
             done
           done
