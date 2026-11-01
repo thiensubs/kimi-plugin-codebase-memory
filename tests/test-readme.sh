@@ -158,5 +158,22 @@ if grep -qF 'bin/run.sh' "$readme"; then bad "README still mentions bin/run.sh";
 if grep -qF 'only resolves when the' "$readme"; then ok
 else bad "README explains why ./bin/run needs the plugin root"; fi
 
+# -- 7. every image link points at a file that exists ---------------------
+missing_img=$(python3 - "$readme" "$root" <<'PY'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+root = pathlib.Path(sys.argv[2])
+out = []
+for m in re.finditer(r"!\[[^\]]*\]\(([^)]+)\)", text):
+    src = m.group(1).strip()
+    if src.startswith(("http://", "https://", "data:")):
+        continue
+    if not (root / src).exists():
+        out.append(src)
+print("\n".join(out))
+PY
+)
+[ -z "$missing_img" ] && ok || bad "README image link points at a missing file" "$missing_img"
+
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

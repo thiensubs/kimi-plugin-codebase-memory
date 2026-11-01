@@ -4,6 +4,19 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.7] - 2026-11-01
+
+### Added
+
+- README "Try it" carries the real session screenshot (`docs/try-it-proof.png`): one prompt, two
+  graph calls (`list_projects`, then `index_status`), no grep. The image is committed to the repo
+  and referenced by a relative path, so it renders on GitHub and survives a release zip.
+
+### Added (tests)
+
+- `tests/test-readme.sh` checks every relative image link resolves to a file in the repo — the
+  failure mode that bit the earlier GitHub-hosted screenshots.
+
 ## [0.2.6] - 2026-11-01
 
 ### Added

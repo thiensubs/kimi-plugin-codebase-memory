@@ -46,6 +46,11 @@ If the answers arrive as `trace_path` / `search_graph` output instead of grep hi
 the MCP server are wired correctly. If they arrive as file listings, the skill did not load — check
 `/plugins info codebase-memory`.
 
+![A real session: one prompt, two graph calls — list_projects then index_status, no grep](docs/try-it-proof.png)
+
+Evidence from a real session (v0.2.6, one tool call each, 7 s total): the prompt went to
+`list_projects`, then `index_status`. No file listing, no grep.
+
 ## How it works, in one picture
 
 ```
