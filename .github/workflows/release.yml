@@ -103,7 +103,7 @@ jobs:
           done
           file bin/prebuilt/windows-x86_64/*.exe
           set +e
-          printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"C:/Users/x/.kimi-code/config.toml"}}' \
+          SECRET_GUARD_MODE=strict printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"C:/Users/x/.kimi-code/config.toml"}}' \
             | ./bin/prebuilt/windows-x86_64/secret_guard.exe
           blocked=$?
           set -e
