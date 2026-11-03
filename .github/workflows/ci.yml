@@ -50,6 +50,7 @@ jobs:
           KIMI_CODE_HOME: ${{ runner.temp }}/kimi-code-home
         run: |
           set +e
+          export SECRET_GUARD_MODE=strict
           printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"path":"C:/Users/x/.kimi-code/config.toml"}}' \
             | ./bin/prebuilt/windows-x86_64/secret_guard.exe
           blocked=$?
