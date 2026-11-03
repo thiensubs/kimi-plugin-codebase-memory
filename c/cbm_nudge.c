@@ -21,7 +21,7 @@
 #include <string.h>
 
 #define SG_TOOL "cbm_nudge"
-#define SG_VERSION "0.2.7"
+#define SG_VERSION "0.2.8"
 #define SG_JSON 0
 #include "selfcheck.h"
 

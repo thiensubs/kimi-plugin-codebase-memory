@@ -37,7 +37,7 @@
 #endif
 
 #define SG_TOOL "secret_guard"
-#define SG_VERSION "0.2.7"
+#define SG_VERSION "0.2.8"
 #define SG_JSON 1
 #include "selfcheck.h"
 
