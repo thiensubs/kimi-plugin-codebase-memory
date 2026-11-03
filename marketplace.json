@@ -4,7 +4,7 @@
     {
       "id": "codebase-memory",
       "displayName": "Codebase Memory",
-      "description": "Graph-first code discovery: the codebase-memory-mcp knowledge graph as an MCP server, graph-first rules, a 58 ms C prompt nudge, and a C secret guard for credential reads.",
+      "description": "Graph-first code discovery for Kimi Code: the codebase-memory-mcp knowledge graph, graph-first rules, a 58 ms C prompt nudge, and a C secret guard that notices credential reads by default (reduced safety; SECRET_GUARD_MODE=strict restores blocking).",
       "homepage": "https://github.com/thiensubs/kimi-plugin-codebase-memory",
       "keywords": [
         "codebase",

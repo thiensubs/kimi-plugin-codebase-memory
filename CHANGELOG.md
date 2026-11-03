@@ -4,6 +4,24 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.8] - 2026-11-03
+
+### Changed
+
+- `secret_guard` default is now **reduced** mode: a detected credential path or
+  secret-shaped value prints a friendly one-line notice, logs
+  `NOTICE reduced <rule> tool=<tool>` (rule and tool name only — never the value),
+  and lets the call run (exit 0). Safety is reduced; rotate the value or pipe text
+  through `secret_guard redact` to inspect it without leaking.
+- `SECRET_GUARD_MODE=strict` restores the old block behavior: exit 2 with a deny
+  decision, `BLOCK <rule> tool=<tool>` in the log, and the deny reason written back
+  into the conversation.
+- README, SECURITY.md, SYSTEM.md and the `using-codebase-memory` skill updated for
+  reduced mode and the `SECRET_GUARD_MODE` switch.
+- Added "Transparency & contribution" to SECURITY.md: what the 40-bit fingerprint registry
+  does and does not prevent, how to audit it, how to change the width, and how to contribute
+  new provider prefixes or fingerprint edge cases.
+
 ## [0.2.7] - 2026-11-01
 
 ### Added

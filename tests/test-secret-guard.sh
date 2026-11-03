@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # tests/test-secret-guard.sh — exercise c/secret_guard.c in both modes.
 #
+# Default mode is reduced: a match prints a friendly notice, logs
+# `NOTICE reduced <rule> tool=<tool>` (rule and tool only, never the value),
+# and exits 0 so the call runs. `SECRET_GUARD_MODE=strict` restores the old
+# block: exit 2 + deny JSON + `BLOCK <rule> tool=<tool>` in the log.
+#
 # Every credential below is fake and generated in this file. The test never
 # reads a real credential file: commands such as
 # `cat ~/.kimi-code/config.toml | secret_guard redact` are only ever passed to
@@ -57,6 +62,11 @@ hook_run() { # payload
     RC=$?
 }
 
+hook_run_strict() { # payload
+    SECRET_GUARD_MODE=strict "$BIN" < <(printf '%s' "$1") >"$WORK/out" 2>"$WORK/err"
+    RC=$?
+}
+
 line_count() { wc -l < "$1" | tr -d ' '; }
 
 expect_allow() { # name, payload
@@ -74,10 +84,37 @@ expect_allow() { # name, payload
     ok
 }
 
-expect_block() { # name, rule, tool, payload
+# Reduced default: exit 0, no stdout deny, a friendly stderr notice, and a
+# NOTICE-reduced line in the log (rule and tool only — never the value).
+expect_notice() { # name, rule, tool, payload
     hook_run "$4"
+    if [ "$RC" -ne 0 ]; then
+        bad "$1: exit $RC, want 0 (reduced allows)"
+        [ -s "$WORK/err" ] && note "stderr: $(head -c 200 "$WORK/err")"
+        return
+    fi
+    if [ -s "$WORK/out" ]; then
+        bad "$1: reduced mode printed to stdout"
+        note "stdout: $(head -c 200 "$WORK/out")"
+        return
+    fi
+    if ! grep -q "reduced safety" "$WORK/err"; then
+        bad "$1: stderr missing reduced-safety notice"
+        note "stderr: $(head -c 200 "$WORK/err")"
+        return
+    fi
+    if ! grep -Fq "NOTICE reduced $2 tool=$3" "$LOG"; then
+        bad "$1: log missing 'NOTICE reduced $2 tool=$3'"
+        return
+    fi
+    ok
+}
+
+# Strict mode: exit 2, single-line deny JSON, one stderr line, BLOCK in log.
+expect_block() { # name, rule, tool, payload
+    hook_run_strict "$4"
     if [ "$RC" -ne 2 ]; then
-        bad "$1: exit $RC, want 2"
+        bad "$1: exit $RC, want 2 (strict blocks)"
         return
     fi
     if ! grep -q '"permissionDecision":"deny"' "$WORK/out"; then
@@ -185,9 +222,19 @@ for entry in "${PROVIDERS[@]}"; do
     key="${entry%%|*}"
     label="${entry##*|}"
     redact_case "provider $label redact ($key)" "$label" "$key"
-    expect_block "provider $label hook ($key)" "$label" "Bash" "$(hook_json_bash "echo $key")"
+    expect_notice "provider $label hook default ($key)" "$label" "Bash" "$(hook_json_bash "echo $key")"
+done
+
+# Strict still blocks every provider key (spot-check a representative subset).
+STRICT_PROVIDERS="sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAA|anthropic-key sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA|openai-key nvapi-AAAAAAAAAAAAAAAAAAAAAAAA|nvidia-key sk-AAAAAAAAAAAAAAAAAAAAAAAA|openai-style-key"
+for entry in $STRICT_PROVIDERS; do
+    key="${entry%%|*}"
+    label="${entry##*|}"
+    expect_block "provider $label hook strict ($key)" "$label" "Bash" "$(hook_json_bash "echo $key")"
     if grep -Fq "$key" "$WORK/out"; then
-        bad "provider $label: deny output leaked the key"
+        bad "provider $label strict: deny output leaked the key"
+    else
+        ok "provider $label strict: deny output does not leak the key"
     fi
 done
 
@@ -196,7 +243,8 @@ done
 JWT='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U'
 got="$(printf 'x %s y\n' "$JWT" | "$BIN" redact)"
 if [ "$got" = "x [REDACTED:jwt] y" ]; then ok; else bad "jwt redact"; note "got: $got"; fi
-expect_block "jwt hook" jwt "Bash" "$(hook_json_bash "echo $JWT")"
+expect_notice "jwt hook default" jwt "Bash" "$(hook_json_bash "echo $JWT")"
+expect_block "jwt hook strict" jwt "Bash" "$(hook_json_bash "echo $JWT")"
 
 BEARER_TOKEN='AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
 got="$(printf 'send Bearer %s now\n' "$BEARER_TOKEN" | "$BIN" redact)"
@@ -206,7 +254,8 @@ else
     bad "bearer redact"
     note "got: $got"
 fi
-expect_block "bearer hook" bearer-token "Bash" "$(hook_json_bash "send Bearer $BEARER_TOKEN now")"
+expect_notice "bearer hook default" bearer-token "Bash" "$(hook_json_bash "send Bearer $BEARER_TOKEN now")"
+expect_block "bearer hook strict" bearer-token "Bash" "$(hook_json_bash "send Bearer $BEARER_TOKEN now")"
 
 cat >"$WORK/pem.in" <<'PEM'
 header line
@@ -231,7 +280,9 @@ else
     bad "private-key redact: block not fully masked"
     note "got: $(tr '\n' '|' <"$WORK/pem.out")"
 fi
-expect_block "private-key hook" private-key "Read" \
+expect_notice "private-key hook default" private-key "Read" \
+    '{"tool_name":"Read","tool_input":{"file_path":"notes.txt","content":"-----BEGIN RSA PRIVATE KEY-----\nMIIEfake\n-----END RSA PRIVATE KEY-----"}}'
+expect_block "private-key hook strict" private-key "Read" \
     '{"tool_name":"Read","tool_input":{"file_path":"notes.txt","content":"-----BEGIN RSA PRIVATE KEY-----\nMIIEfake\n-----END RSA PRIVATE KEY-----"}}'
 
 # context rules
@@ -242,7 +293,9 @@ redact_expect "context toml style" 'password = "hunter2hunter2"' \
     'password = "[REDACTED:password]"'
 redact_expect "context json style" '{"api_key": "Zx81kQp29LmN4vT"}' \
     '{"api_key": "[REDACTED:api_key]"}'
-expect_block "context secret hook" client_secret "Bash" \
+expect_notice "context secret hook default" client_secret "Bash" \
+    "$(hook_json_bash 'export CLIENT_SECRET=Abc123Xyz789Qrs')"
+expect_block "context secret hook strict" client_secret "Bash" \
     "$(hook_json_bash 'export CLIENT_SECRET=Abc123Xyz789Qrs')"
 
 got="$(printf 'dsn postgres://admin:hunter2pass@db.example.test/app\n' | "$BIN" redact)"
@@ -267,42 +320,53 @@ if [ "$got" = "API_KEY=your_api_key_here" ]; then ok; else bad "placeholder reda
 
 # ------------------------------------------------------------- path rules ----
 
-expect_block "path .env" credential-path "Read" "$(hook_json_read '.env')"
-expect_block "path .env.local" credential-path "Read" "$(hook_json_read '/repo/app/.env.local')"
+expect_notice "path .env default" credential-path "Read" "$(hook_json_read '.env')"
+expect_notice "path .env.local default" credential-path "Read" "$(hook_json_read '/repo/app/.env.local')"
 expect_allow "path .env.example" "$(hook_json_read '.env.example')"
 expect_allow "path .env.sample" "$(hook_json_read '.env.sample')"
-expect_block "path .npmrc" credential-path "Read" "$(hook_json_read '~/.npmrc')"
-expect_block "path .git-credentials" credential-path "Read" "$(hook_json_read '/repo/.git-credentials')"
-expect_block "path id_rsa" credential-path "Read" "$(hook_json_read 'id_rsa')"
-expect_block "path .ssh fragment" credential-path "Read" "$(hook_json_read '/Users/kai/.ssh/id_ed25519')"
-expect_block "path home tilde ssh" credential-path "Read" "$(hook_json_read '~/.ssh/known_hosts')"
-expect_block "path .aws fragment" credential-path "Read" "$(hook_json_read '/Users/kai/.aws/credentials')"
-expect_block "path .ssh directory no slash" credential-path "Read" "$(hook_json_read '~/.ssh')"
-expect_block "path .aws directory no slash" credential-path "Read" "$(hook_json_read '/Users/kai/.aws')"
-expect_block "path .gnupg directory no slash" credential-path "Read" "$(hook_json_read '~/.gnupg')"
+expect_notice "path .npmrc default" credential-path "Read" "$(hook_json_read '~/.npmrc')"
+expect_notice "path .git-credentials default" credential-path "Read" "$(hook_json_read '/repo/.git-credentials')"
+expect_notice "path id_rsa default" credential-path "Read" "$(hook_json_read 'id_rsa')"
+expect_notice "path .ssh fragment default" credential-path "Read" "$(hook_json_read '/Users/kai/.ssh/id_ed25519')"
+expect_notice "path home tilde ssh default" credential-path "Read" "$(hook_json_read '~/.ssh/known_hosts')"
+expect_notice "path .aws fragment default" credential-path "Read" "$(hook_json_read '/Users/kai/.aws/credentials')"
+expect_notice "path .ssh directory no slash default" credential-path "Read" "$(hook_json_read '~/.ssh')"
+expect_notice "path .aws directory no slash default" credential-path "Read" "$(hook_json_read '/Users/kai/.aws')"
+expect_notice "path .gnupg directory no slash default" credential-path "Read" "$(hook_json_read '~/.gnupg')"
 expect_allow "path name ending in .ssh is not the dir" "$(hook_json_read 'build/my.ssh')"
-expect_block "path kimi config" credential-path "Read" "$(hook_json_read '~/.kimi-code/config.toml')"
-expect_block "path kimi credentials" credential-path "Read" "$(hook_json_read '~/.kimi-code/credentials/nvidia.json')"
-expect_block "path pem extension" credential-path "Read" "$(hook_json_read 'certs/server.pem')"
-expect_block "path kdbx extension" credential-path "Read" "$(hook_json_read 'vault.kdbx')"
-expect_block "path credential json" credential-path "Read" "$(hook_json_read 'config/credentials.json')"
-expect_block "path secrets yaml" credential-path "Read" "$(hook_json_read 'deploy/secrets.yaml')"
-expect_block "path service account" credential-path "Read" "$(hook_json_read 'service-account-prod.json')"
-expect_block "path gh config" credential-path "Read" "$(hook_json_read '~/.config/gh/hosts.yml')"
+expect_notice "path kimi config default" credential-path "Read" "$(hook_json_read '~/.kimi-code/config.toml')"
+expect_notice "path kimi credentials default" credential-path "Read" "$(hook_json_read '~/.kimi-code/credentials/nvidia.json')"
+expect_notice "path pem extension default" credential-path "Read" "$(hook_json_read 'certs/server.pem')"
+expect_notice "path kdbx extension default" credential-path "Read" "$(hook_json_read 'vault.kdbx')"
+expect_notice "path credential json default" credential-path "Read" "$(hook_json_read 'config/credentials.json')"
+expect_notice "path secrets yaml default" credential-path "Read" "$(hook_json_read 'deploy/secrets.yaml')"
+expect_notice "path service account default" credential-path "Read" "$(hook_json_read 'service-account-prod.json')"
+expect_notice "path gh config default" credential-path "Read" "$(hook_json_read '~/.config/gh/hosts.yml')"
 expect_allow "path source file" "$(hook_json_read 'src/main.c')"
 expect_allow "path doc" "$(hook_json_read 'docs/notes.md')"
 expect_allow "path pem name in prose" "$(hook_json_read 'docs/pem-format.md')"
+
+# strict still blocks credential paths (spot-check a subset).
+expect_block "path .env strict" credential-path "Read" "$(hook_json_read '.env')"
+expect_block "path ~/.ssh/id_rsa strict" credential-path "Read" "$(hook_json_read '~/.ssh/id_rsa')"
+expect_block "path certs/server.pem strict" credential-path "Read" "$(hook_json_read 'certs/server.pem')"
 
 # path rules only apply to tools that can read
 expect_allow "write tool is not path-checked" \
     '{"tool_name":"Write","tool_input":{"file_path":".env","content":"API_KEY=your_key_here"}}'
 
 # alternate payload key spellings
-expect_block "payload tool/input fallbacks" credential-path "Bash" \
+expect_notice "payload tool/input fallbacks default" credential-path "Bash" \
     '{"tool":"Bash","input":{"cmd":"cat ~/.ssh/id_rsa"}}'
-expect_block "payload name/parameters fallbacks" credential-path "bash" \
+expect_block "payload tool/input fallbacks strict" credential-path "Bash" \
+    '{"tool":"Bash","input":{"cmd":"cat ~/.ssh/id_rsa"}}'
+expect_notice "payload name/parameters fallbacks default" credential-path "bash" \
     '{"name":"bash","parameters":{"script":"base64 ~/.docker/config.json"}}'
-expect_block "tool_input as encoded string" credential-path "Bash" \
+expect_block "payload name/parameters fallbacks strict" credential-path "bash" \
+    '{"name":"bash","parameters":{"script":"base64 ~/.docker/config.json"}}'
+expect_notice "tool_input as encoded string default" credential-path "Bash" \
+    '{"tool_name":"Bash","tool_input":"{\"command\":\"cat .env\"}"}'
+expect_block "tool_input as encoded string strict" credential-path "Bash" \
     '{"tool_name":"Bash","tool_input":"{\"command\":\"cat .env\"}"}'
 
 # ---------------------------------------------------- bash command rules ----
@@ -311,13 +375,18 @@ expect_allow "cat README.md" "$(hook_json_bash 'cat README.md')"
 expect_allow "grep -c on the real config path" "$(hook_json_bash 'grep -c api_key ~/.kimi-code/config.toml')"
 expect_allow "grep -l presence flag" "$(hook_json_bash 'grep -l token ~/.kimi-code/config.toml')"
 expect_allow "pipe through redact" "$(hook_json_bash 'cat ~/.kimi-code/config.toml | secret_guard redact')"
-expect_block "cat real config without redact" credential-path "Bash" \
+expect_notice "cat real config without redact default" credential-path "Bash" \
     "$(hook_json_bash 'cat ~/.kimi-code/config.toml')"
-expect_block "grep real config without presence flag" credential-path "Bash" \
+expect_notice "grep real config without presence flag default" credential-path "Bash" \
     "$(hook_json_bash 'grep -rn api_key ~/.kimi-code/config.toml')"
-expect_block "less .env" credential-path "Bash" "$(hook_json_bash 'less /repo/.env')"
-expect_block "cp .env.example .env" credential-path "Bash" "$(hook_json_bash 'cp .env.example .env')"
-expect_block "curl into pem" credential-path "Bash" "$(hook_json_bash 'curl -o out.pem https://example.test/x')"
+expect_notice "less .env default" credential-path "Bash" "$(hook_json_bash 'less /repo/.env')"
+expect_notice "cp .env.example .env default" credential-path "Bash" "$(hook_json_bash 'cp .env.example .env')"
+expect_notice "curl into pem default" credential-path "Bash" "$(hook_json_bash 'curl -o out.pem https://example.test/x')"
+expect_block "cat real config without redact strict" credential-path "Bash" \
+    "$(hook_json_bash 'cat ~/.kimi-code/config.toml')"
+expect_block "grep real config without presence flag strict" credential-path "Bash" \
+    "$(hook_json_bash 'grep -rn api_key ~/.kimi-code/config.toml')"
+expect_block "less .env strict" credential-path "Bash" "$(hook_json_bash 'less /repo/.env')"
 expect_allow "find name glob is not a path" "$(hook_json_bash "find . -name '*.pem'")"
 expect_allow "unrelated command" "$(hook_json_bash 'cargo build --release')"
 
@@ -332,11 +401,17 @@ mkdir -p "$WORK/cwd"
         "$BIN" >"$WORK/out2" 2>"$WORK/err2"
     echo $? >"$WORK/rc2"
 )
-if [ "$(cat "$WORK/rc2")" = "2" ] && grep -Fq "BLOCK credential-path tool=Bash" "$LOG"; then
+if [ "$(cat "$WORK/rc2")" = "0" ] && grep -q "reduced safety" "$WORK/err2"; then
     ok
 else
-    bad "search verb on existing relative credential file: exit $(cat "$WORK/rc2"), want 2"
+    bad "search verb on existing relative credential file: exit $(cat "$WORK/rc2"), want reduced allow"
 fi
+(
+    cd "$WORK/cwd" || exit 1
+    SECRET_GUARD_MODE=strict "$BIN" < <(printf '%s' '{"tool_name":"Bash","tool_input":{"command":"grep secret id_rsa"}}') >"$WORK/out4" 2>"$WORK/err4"
+    echo $? >"$WORK/rc4"
+)
+if [ "$(cat "$WORK/rc4")" = "2" ]; then ok; else bad "search verb strict on credential file: exit $(cat "$WORK/rc4"), want 2"; fi
 (
     cd "$WORK/cwd" || exit 1
     printf '%s' '{"tool_name":"Bash","tool_input":{"command":"grep secret notes.txt"}}' |

@@ -56,9 +56,9 @@ rm -f "$reg"
 payload=$(printf '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo %s"}}' "$fake")
 if printf '%s' "$payload" | "$bin" >/dev/null 2>&1; then ok; else bad "allow when no registry exists"; fi
 
-# -- 6. registered fingerprint blocks --------------------------------------
+# -- 6. registered fingerprint blocks (strict mode) --------------------------
 printf '%s\n' "$out" > "$reg"
-printf '%s' "$payload" | "$bin" >"$work/out6" 2>"$work/err6"
+SECRET_GUARD_MODE=strict "$bin" < <(printf '%s' "$payload") >"$work/out6" 2>"$work/err6"
 rc=$?
 if [ "$rc" = "2" ]; then ok; else bad "registered fingerprint blocks (exit 2)" "rc=$rc"; fi
 if grep -q 'known-secret' "$work/out6" "$work/err6" 2>/dev/null; then
@@ -81,7 +81,7 @@ if printf '%s' "$p2" | "$bin" >/dev/null 2>&1; then ok; else bad "unregistered t
 masked=$(printf 'auth %s\n' "$fake" | "$bin" redact)
 if [ "$masked" = "auth [REDACTED:known-secret]" ]; then ok; else bad "redact masks registered token" "got: $masked"; fi
 
-# -- 9. registry parsing: comments, blanks, junk, uppercase ---------------
+# -- 9. registry parsing: comments, blanks, junk, uppercase (strict blocks) --
 {
   echo "# provider keys that leaked on 2026-11-01"
   echo ""
@@ -89,15 +89,15 @@ if [ "$masked" = "auth [REDACTED:known-secret]" ]; then ok; else bad "redact mas
   echo "zzzzzzzzzz"
   printf '%s\n' "$(printf '%s' "$out" | tr 'a-f' 'A-F')"
 } > "$reg"
-printf '%s' "$payload" | "$bin" >/dev/null 2>&1
+SECRET_GUARD_MODE=strict "$bin" < <(printf '%s' "$payload") >/dev/null 2>&1
 rc=$?
 if [ "$rc" = "2" ]; then ok; else bad "uppercase fingerprint + junk lines still block" "rc=$rc"; fi
 
 # -- 10. credential path is allowed only through the fingerprint pipe ------
 cred='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat /Users/x/.kimi-code/config.toml"}}'
-printf '%s' "$cred" | "$bin" >/dev/null 2>&1
+SECRET_GUARD_MODE=strict "$bin" < <(printf '%s' "$cred") >/dev/null 2>&1
 rc=$?
-if [ "$rc" = "2" ]; then ok; else bad "bare credential read stays blocked" "rc=$rc"; fi
+if [ "$rc" = "2" ]; then ok; else bad "bare credential read stays blocked (strict)" "rc=$rc"; fi
 
 pipe='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"cat /Users/x/.kimi-code/config.toml | ./bin/run secret_guard fingerprint"}}'
 printf '%s' "$pipe" | "$bin" >/dev/null 2>&1

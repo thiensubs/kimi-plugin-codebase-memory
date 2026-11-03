@@ -22,17 +22,31 @@ results from the graph server. A secret reaches the provider through one of thre
    log line, a config read through a path the guard does not recognise.
 
 `bin/secret_guard` is a `PreToolUse` hook: it sees the pending tool call before it runs and
-can refuse it (exit 2). It closes door 1 and most of door 2. It cannot close door 3, and it
-cannot retract anything already in context.
+can refuse it (exit 2, in strict mode). It closes door 1 and most of door 2. It cannot close
+door 3, and it cannot retract anything already in context.
 
 The hook runs on the machine running Kimi Code, before the tool's permission check, with the
 plugin root as its working directory. Kimi Code treats exit 0 as allow, exit 2 as block, any
 other exit code or a timeout as allow.
 
+## Two enforcement modes
+
+`SECRET_GUARD_MODE` chooses how the guard reacts when it detects a credential path or
+secret-shaped value:
+
+| Mode | Effect | Use |
+|------|--------|-----|
+| reduced (default, unset or any value other than `strict`) | prints a friendly one-line notice to stderr, logs `NOTICE reduced <rule> tool=<tool>` (rule and tool name only — never the value), then exits 0 so the call runs | everyday work where graph-assisted discovery is more valuable than a hard block |
+| strict | exit 2 with a deny decision that blocks the call, logs `BLOCK <rule> tool=<tool>`, and writes the deny reason back into the conversation | when you want the old block-everything behavior |
+
+Reduced mode is an accident preventer that no longer interrupts normal tool calls. Strict mode
+is the security boundary for anyone who prefers a hard block.
+
 ## What the guard enforces
 
-A call is blocked when any of the following matches. The rule name is what appears in the log
-and in the deny reason.
+A call is blocked when any of the following matches **and `SECRET_GUARD_MODE=strict`**. In
+reduced mode (the default) the same match emits a notice and lets the call run. The rule name
+is what appears in the log and in the deny reason.
 
 | Rule | Trigger | Blocks | Allows |
 | --- | --- | --- | --- |
@@ -60,10 +74,10 @@ For shell tools, the command string is tokenised and checked:
 
 - **Readers** — `cat`, `head`, `tail`, `less`, `more`, `bat`, `source`, `strings`, `xxd`,
   `od`, `base64`, `cp`, `scp`, `rsync`, `tar`, `zip`, `curl`, `wget`: any non-flag argument
-  that matches a credential path blocks.
+  that matches a credential path would block in strict mode (notice + allow by default).
 - **Search tools** — `grep`, `rg`, `ag`, `ack`, `sed`, `awk`, `find`, `cut`, `jq`: an
-  argument blocks when it contains `/`, starts with `~`, or exists relative to the working
-  directory, and matches a credential path.
+  argument would block in strict mode when it contains `/`, starts with `~`, or exists
+  relative to the working directory, and matches a credential path.
 - **Presence checks pass** — `-c`, `--count`, `-l`, `--files-with-matches`, `-q`, `--quiet`,
   `--silent` anywhere in the command allow it. `grep -c api_key ~/.kimi-code/config.toml`
   tells you whether a key exists without printing it.
@@ -98,15 +112,22 @@ out (the default timeout here is 3 s).
 | Compiler fails | `run` logs one line, exits 0 |
 | Hook times out or crashes | Kimi Code allows the call |
 
-Because of this, the guard is an accident preventer for an agent that reads credentials
-because nothing stopped it — not a security boundary. Keep permission prompts on. Anyone who
-can run code as your user can also delete, replace or bypass the hook.
+## Reduced vs strict: which one to run
+
+Reduced mode (the default) is what the plugin ships with because a hard block broke normal
+behavior — every credential-ish path, including harmless scans, stopped the tool call. Reduced
+mode keeps the detection and the logging but lets the call through, with a friendly notice so
+you know something was redacted-worthy. Use `SECRET_GUARD_MODE=strict` when you want the
+original block behavior back.
+
+Because the guard is fail-open and runs locally, neither mode is a security boundary — treat
+both as an accident preventer, and keep permission prompts on.
 
 ## Known limits
 
 1. **Regex-shaped searches pass.** `grep -o 'sk-[A-Za-z0-9]*' config.toml` is allowed: the
    pattern is not a secret, and `config.toml` is not a credential name. The same command
-   against `~/.kimi-code/config.toml` blocks on the path, but any other file that happens to
+   against `~/.kimi-code/config.toml` would block on the path in strict mode, but any other file that happens to
    contain keys does not.
 2. **Secrets already in context stay there.** Anything read before the plugin was installed,
    or produced by a tool the guard does not gate, has already been sent.
@@ -191,7 +212,7 @@ Prefix rules only catch shapes. The fingerprint registry catches *one specific v
 - Registry: `$KIMI_CODE_HOME/secret-fingerprints.txt` (default `~/.kimi-code/`), one fingerprint
   per line, `#` comments and blank lines ignored, case-insensitive. Override the path with
   `SECRET_GUARD_FINGERPRINTS`.
-- A hit denies the call as `known-secret` and `redact` masks the value as
+- A hit denies the call as `known-secret` under `SECRET_GUARD_MODE=strict` (notice in reduced default) and `redact` masks the value as
   `[REDACTED:known-secret]`. The registry stores no plaintext, and neither the log nor the deny
   message ever echoes the secret.
 
@@ -204,3 +225,66 @@ Known limits of this class: only tokens of 16+ characters from `[A-Za-z0-9_-]` a
 so a key with `.` or `/` in it is missed; a fingerprint is a *presence* check, not a proof of
 identity (a deliberate 2^40 search could collide, which no realistic attacker will spend on a
 local file).
+
+## Transparency & contribution: how the 40-bit fingerprint prevents leaks
+
+This section explains, in plain terms, what the fingerprint registry does and does not do, so
+you can audit it yourself and suggest improvements.
+
+### What it prevents
+
+A leaked key keeps working until it is rotated. The fingerprint registry closes that gap: once a
+value's 40-bit fingerprint is registered, any later tool call carrying that same value is caught
+by the guard — notice in reduced mode, block in strict mode. Rotation plus registration means a
+leaked key cannot be quietly reused through Kimi Code.
+
+### What it does not prevent
+
+- **New, never-leaked keys.** Fingerprints only match values you have already registered. A key
+  that has never leaked passes unless its shape matches a provider prefix rule.
+- **Obfuscated values.** Base64, split strings, or character-by-character construction bypass the
+  token scanner. Fingerprinting is a line of defense, not a seal.
+- **Non-token values.** Keys containing `.` or `/` (some vendor formats) are not fingerprinted,
+  nor are tokens shorter than 16 characters.
+
+### What you can audit (everything is visible)
+
+The registry is a plain text file — `$KIMI_CODE_HOME/secret-fingerprints.txt` by default — with
+one 10-hex-char fingerprint per line. It contains **no secret values, no prefixes, no provider
+names**. You can read it, back it up, version it, or delete any line at any time.
+
+The log writes only `NOTICE reduced known-secret tool=<tool>` or `BLOCK known-secret tool=<tool>`
+— never the value, never the fingerprint in cleartext association with a call.
+
+### How to change the 40-bit width
+
+The width is compiled into `c/secret_guard.c` as `FP40` producing 10 hex characters (40 bits). To
+use a different width, edit `fp40()` and the 10-char buffer, then rebuild:
+
+```sh
+clang -O2 -std=c11 -Wall -Wextra -Werror c/secret_guard.c -o bin/secret_guard
+cp bin/secret_guard bin/prebuilt/darwin-x86_64/secret_guard
+cp bin/secret_guard bin/prebuilt/darwin-arm64/secret_guard
+```
+
+Why 40 bits was chosen: at 1,000 registered values the collision chance is ~4.5×10⁻⁷; the first
+expected collision needs ~1.5M entries. Wider is more collision-resistant but doubles the file
+size per step; 40 bits is the point where collisions are negligible for a local registry and the
+file stays tiny. If you have a threat model that justifies wider fingerprints, open a discussion
+with your numbers.
+
+### Contributing
+
+- **New provider prefixes:** add to the `PREFIXES` table in `c/secret_guard.c`, update
+  `SECURITY.md` "Provider prefixes covered", add cases to `tests/test-secret-guard.sh`, and bump
+  the changelog.
+- **Fingerprint edge cases:** report tokens that should be fingerprinted but are missed (e.g.
+  keys with `.`/`/`, short tokens) — each is a real gap to fix.
+- **False positives:** if a non-secret value lands in your registry, delete its line. If the
+  guard flags a safe value, share the pattern (value replaced with `[REDACTED:label]`) so the
+  rules can be narrowed.
+- **Transparency issues:** if anything here is unclear or a behavior surprises you, that is a doc
+  bug — open it and we will rewrite this section.
+
+The goal is an open, verifiable leak-prevention layer: you can see every registered fingerprint,
+every rule, and every line of C that enforces them.

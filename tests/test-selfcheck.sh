@@ -103,10 +103,11 @@ rc=$?
 
 # -- 7. the check never changes a block decision --------------------------
 printf '9\n' > "$work/block-counter"
-printf '{"tool_name":"Bash","tool_input":{"command":"cat /Users/x/.kimi-code/config.toml"}}' \
-  | SG_SELFCHECK_STATE="$work/block-counter" SG_SELFTEST_LEAK=1 "$sg" >/dev/null 2>&1
+SG_SELFCHECK_STATE="$work/block-counter" SG_SELFTEST_LEAK=1 SECRET_GUARD_MODE=strict "$sg" \
+  < <(printf '{"tool_name":"Bash","tool_input":{"command":"cat /Users/x/.kimi-code/config.toml"}}') \
+  >/dev/null 2>&1
 rc=$?
-[ "$rc" = "2" ] && ok || bad "sampled run still blocks with exit 2 (rc=$rc)"
+[ "$rc" = "2" ] && ok || bad "sampled run still blocks with exit 2 (strict) (rc=$rc)"
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

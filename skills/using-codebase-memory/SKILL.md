@@ -20,7 +20,10 @@ costs tens of thousands. Text search still wins for literals.
   (`/codebase-memory:audit-secrets` lists them, paths only).
 - `search_code` / `get_code_snippet` results that contain a secret are reported as
   `[REDACTED:<provider>]`, never quoted — even when the exact value was requested.
-- The PreToolUse `secret_guard` hook enforces this and blocks the call; a block is final.
+- The PreToolUse `secret_guard` hook enforces this. Default is **reduced** mode: a match prints a
+  friendly notice, logs it (rule and tool only, never the value), and lets the call run — safety
+  is reduced. Set `SECRET_GUARD_MODE=strict` to restore the old block (exit 2 + deny decision).
+  A block is final.
 
 ## Which tool answers which question
 

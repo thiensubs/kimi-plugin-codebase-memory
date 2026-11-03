@@ -1434,32 +1434,65 @@ static void ensure_dir(const char *path) {
     }
 }
 
-static void log_block(const char *rule, const char *tool) {
+/* Resolve $KIMI_CODE_HOME/logs/secret-guard.log (fallback ~/.kimi-code/logs/…),
+   creating the directory on first use. Returns 0 when there is nowhere to log. */
+static int log_path(char *out, size_t cap) {
     const char *base = getenv("KIMI_CODE_HOME");
     char dir[1024];
     if (base && *base) {
         snprintf(dir, sizeof dir, "%s/logs", base);
     } else {
         const char *home = getenv("HOME");
-        if (!home || !*home) return;
+        if (!home || !*home) return 0;
         snprintf(dir, sizeof dir, "%s/.kimi-code/logs", home);
     }
     ensure_dir(dir);
+    int n = snprintf(out, cap, "%s/secret-guard.log", dir);
+    return n > 0 && (size_t)n < cap;
+}
 
-    char path[1200];
-    snprintf(path, sizeof path, "%s/secret-guard.log", dir);
+static void log_append(const char *path, const char *line) {
     FILE *f = fopen(path, "a");
     if (!f) return;
-
-    char clean[64];
-    size_t c = 0;
-    for (const char *p = tool; *p && c + 1 < sizeof clean; p++) {
-        clean[c++] = (unsigned char)*p < 0x20 ? '_' : *p;
-    }
-    clean[c] = '\0';
-
-    fprintf(f, "BLOCK %s tool=%s\n", rule, c > 0 ? clean : "unknown");
+    fprintf(f, "%s\n", line);
     fclose(f);
+}
+
+static void sanitize_tool(const char *tool, char *out, size_t cap) {
+    size_t c = 0;
+    for (const char *p = tool; *p && c + 1 < cap; p++) {
+        out[c++] = (unsigned char)*p < 0x20 ? '_' : *p;
+    }
+    out[c] = '\0';
+}
+
+static void log_block(const char *rule, const char *tool) {
+    char path[1200];
+    if (!log_path(path, sizeof path)) return;
+    char clean[64];
+    sanitize_tool(tool, clean, sizeof clean);
+    char line[320];
+    snprintf(line, sizeof line, "BLOCK %s tool=%s", rule,
+             clean[0] ? clean : "unknown");
+    log_append(path, line);
+}
+
+static void log_notice(const char *rule, const char *tool) {
+    char path[1200];
+    if (!log_path(path, sizeof path)) return;
+    char clean[64];
+    sanitize_tool(tool, clean, sizeof clean);
+    char line[320];
+    snprintf(line, sizeof line, "NOTICE reduced %s tool=%s", rule,
+             clean[0] ? clean : "unknown");
+    log_append(path, line);
+}
+
+/* SECRET_GUARD_MODE=strict restores the old block-everything behavior.
+   Anything else (default) runs in reduced mode: notice and allow. */
+static int guard_strict(void) {
+    const char *mode = getenv("SECRET_GUARD_MODE");
+    return mode != NULL && strcmp(mode, "strict") == 0;
 }
 
 static int emit_deny(const char *rule, const char *tool) {
@@ -1488,6 +1521,21 @@ static int emit_deny(const char *rule, const char *tool) {
             tool[0] ? tool : "unknown");
     log_block(rule, tool);
     return 2;
+}
+
+/* Reduced mode: a friendly notice on stderr (and in the log), then allow the call.
+   Nothing secret is ever printed; the log records only the rule and the tool name. */
+static int emit_notice(const char *rule, const char *tool) {
+    char notice[320];
+    snprintf(notice, sizeof notice,
+        "secret_guard (reduced safety): %s found in a %s call — the call is allowed, "
+        "not blocked. Safety is reduced: rotate the value, or pipe text through "
+        "secret_guard redact to inspect it without leaking.",
+        rule, tool[0] ? tool : "unknown");
+    fprintf(stderr, "%s\n", notice);
+    fflush(stderr);
+    log_notice(rule, tool);
+    return 0;
 }
 
 static int hook_mode(void) {
@@ -1550,7 +1598,7 @@ static int hook_mode(void) {
     hits_free(&hits);
     buf_free(&in);
 
-    if (rule) return emit_deny(rule, tool);
+    if (rule) return guard_strict() ? emit_deny(rule, tool) : emit_notice(rule, tool);
     return 0;
 }
 

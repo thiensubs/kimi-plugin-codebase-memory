@@ -1,7 +1,7 @@
 {
   "name": "codebase-memory",
-  "version": "0.2.7",
-  "description": "Graph-first code discovery for Kimi Code: the codebase-memory-mcp knowledge graph plus the workflow rules that make the agent actually use it, with a PreToolUse guard that keeps credential files out of the transcript and out of the index.",
+  "version": "0.2.8",
+  "description": "Graph-first code discovery for Kimi Code: the codebase-memory-mcp knowledge graph plus the workflow rules that make the agent actually use it, with a PreToolUse secret guard that notices credential reads by default (reduced safety; SECRET_GUARD_MODE=strict restores blocking).",
   "keywords": [
     "codebase",
     "graph",

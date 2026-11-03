@@ -1,8 +1,9 @@
 # Codebase Memory
 
 A Kimi Code plugin that puts a codebase knowledge graph in front of the agent, keeps the
-per-prompt nudge at ~58 ms instead of ~2.1 s, and blocks credential files from being read
-into the transcript.
+per-prompt nudge at ~58 ms instead of ~2.1 s, and notices credential access instead of
+blocking it by default (reduced safety). Block-only behavior is available with
+`SECRET_GUARD_MODE=strict`.
 
 Three pieces, one install:
 
@@ -10,7 +11,7 @@ Three pieces, one install:
 | --- | --- |
 | **Graph** | The [codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) knowledge graph as an MCP server, plus the system-prompt rules, skill and commands that keep the agent using it |
 | **Nudge** | `bin/cbm_nudge`, a ~58 ms C `UserPromptSubmit` hook that reminds the agent to query the graph on structure questions |
-| **Guard** | `bin/secret_guard`, a C `PreToolUse` hook that blocks credential reads and plaintext provider keys, with a `redact` filter for the cases where a value must be inspected |
+| **Guard** | `bin/secret_guard`, a C `PreToolUse` hook that notices credential reads and plaintext provider keys by default (`SECRET_GUARD_MODE=strict` restores blocking), with a `redact` filter for the cases where a value must be inspected |
 
 ## What the install line means
 
@@ -66,14 +67,15 @@ Evidence from a real session (v0.2.6, one tool call each, 7 s total): the prompt
               ┌──────────────────┐
               │  secret_guard    │◄── inspects the *call*, never the tool result
               │  (PreToolUse)    │
-              └───┬──────────┬───┘
+              └───┬──────────┬───────────────┐
  credential path or│          │nothing suspicious
  a key inside the  │          │
  call              │          │
-             ┌─────▼──┐  ┌────▼──────────────┐
-             │  deny  │  │ the tool runs     │
-             │ exit 2 │  │ graph / file / …  │
-             └────────┘  └───────────────────┘
+             ┌─────▼──┐  ┌────▼──────────────┐  ┌─────────────────────────┐
+             │  deny  │  │ the tool runs     │  │ reduced (default):      │
+             │ exit 2 │  │ graph / file / …  │  │ notice + allow (exit 0) │
+             └────────┘  └───────────────────┘  └─────────────────────────┘
+             (strict: SECRET_GUARD_MODE=strict)
 ```
 
 **Why two hooks instead of a proxy:** Kimi Code already owns the loop. The plugin only
@@ -87,9 +89,9 @@ hop to time out.
 | --- | --- | --- | --- | --- |
 | Graph | `codebase-memory-mcp` from `PATH` (MCP `graph`) | every graph tool call | upstream server | symbols, callers, impact — instead of grepping |
 | Nudge | `c/cbm_nudge.c` | `UserPromptSubmit` | ~58 ms | one short reminder, or silence |
-| Guard | `c/secret_guard.c` | `PreToolUse` | ~60 ms | exit 0 (allow) or exit 2 + a reason |
+| Guard | `c/secret_guard.c` | `PreToolUse` | ~60 ms | exit 0 notice + allow (reduced default) or exit 2 + a reason (strict) |
 
-### What a blocked call looks like
+### What a blocked call looks like (strict mode only)
 
 ```
 secret_guard: blocked credential-path (tool=Read)
@@ -97,8 +99,14 @@ secret_guard: blocked credential-path (tool=Read)
  "permissionDecisionReason":"Blocked: credential or private-key path. …"}}
 ```
 
-The reason is written back into the conversation, so the model can choose another route
-instead of retrying blindly.
+In reduced mode (the default) nothing is blocked: the call runs and a one-line notice goes to
+stderr and to `$KIMI_CODE_HOME/logs/secret-guard.log`:
+
+```
+secret_guard (reduced safety): credential-path found in a Read call — the call is allowed, not
+blocked. Safety is reduced: rotate the value, or pipe text through secret_guard redact to
+inspect it without leaking.
+```
 
 ### Footprint
 
@@ -159,9 +167,14 @@ cannot parse a payload it logs the payload's **key names only** — never values
 
 ## 3. The secret guard
 
-`bin/secret_guard` (`c/secret_guard.c`) runs on every `PreToolUse`. It exits 2 with a deny
-decision when a tool call would read a credential file or when the call itself carries a
-secret-shaped value. It covers:
+`bin/secret_guard` (`c/secret_guard.c`) runs on every `PreToolUse`. By default it runs in **reduced**
+mode: when it detects a credential path or a secret-shaped value it prints a friendly one-line
+notice, logs `NOTICE reduced <rule> tool=<tool>` (paths only, never values), and exits 0 so the
+call runs. Safety is reduced — rotate the value, or pipe text through `secret_guard redact` to
+inspect it without leaking.
+
+Set `SECRET_GUARD_MODE=strict` to restore the old behavior: exit 2 with a deny decision that
+blocks the call. It covers:
 
 - **Credential paths** — `.env` and `.env.*` (except `.env.example`, `.env.sample`,
   `.env.template`, `.env.dist`), `~/.ssh/`, `~/.aws/`, `~/.gnupg/`, `~/.kube/`,
@@ -195,8 +208,7 @@ cat ~/.kimi-code/config.toml | "$PLUGIN/bin/run" secret_guard redact
 A command containing `| … redact` is allowed through the guard, so this is the supported way
 to inspect a credential file's shape without copying its values.
 
-**Log.** Every block appends one line — the rule and the tool name, never the value — to
-`$KIMI_CODE_HOME/logs/secret-guard.log` (fallback `~/.kimi-code/logs/secret-guard.log`).
+**Log.** Every block (strict) or notice (reduced default) appends one line — the rule and the tool name, never the value — to `$KIMI_CODE_HOME/logs/secret-guard.log` (fallback `~/.kimi-code/logs/secret-guard.log`).
 
 **Turning it off.** There is no disable variable in 0.2.0. Disable the plugin in `/plugins`.
 The full threat model and the exact rule classes are in [SECURITY.md](SECURITY.md).
@@ -217,10 +229,7 @@ cat ~/.kimi-code/config.toml | "$PLUGIN/bin/run" secret_guard fingerprint --secr
 shell's cwd is the plugin root, which is true for a hook and false for you. From a checkout, set
 `PLUGIN=<checkout>` instead.
 
-From then on, any tool call carrying that value is denied as `known-secret`, and `redact` masks
-it, even if the provider changes the key format. `--secrets` restricts the output to values the
-pattern rules already flag, so a URL or a model id in the same file is not registered. At 40 bits
-a collision needs ~1.5M registered values; a registry of hundreds is nowhere near it.
+From then on, any tool call carrying that value is noticed as `known-secret` (reduced default) or denied as `known-secret` (strict), and `redact` masks it, even if the provider changes the key format. `--secrets` restricts the output to values the pattern rules already flag, so a URL or a model id in the same file is not registered. At 40 bits a collision needs ~1.5M registered values; a registry of hundreds is nowhere near it. The registry is transparent — see "Transparency & contribution" in [SECURITY.md](SECURITY.md) for what it does and does not prevent, how to audit it, and how to change the 40-bit width.
 
 ### Self-check, every 10th run
 
@@ -299,7 +308,8 @@ and shipped in the release archive; without one, the dispatcher compiles the too
 | `CBM_MEM_BUDGET_MB` | upstream server | Indexing memory budget, default 512 MB. Export it before launching Kimi Code |
 | `CC` | `bin/run`, `build-c.sh` | Compiler for the fallback build |
 | `CBM_NUDGE_DUMP` | `bin/cbm_nudge` | Writes the last hook payload to `$KIMI_CODE_HOME/logs/cbm-nudge-payload.json` for debugging |
-| `SECRET_GUARD_DISABLE` | — | Not implemented. To stop the guard, disable the plugin with `/plugins disable codebase-memory` |
+| `SECRET_GUARD_DISABLE` | — | Not implemented. To stop the guard entirely, disable the plugin with `/plugins disable codebase-memory` |
+| `SECRET_GUARD_MODE` | `secret_guard` hook | `strict` restores block-on-secret (exit 2). Anything else, or unset, runs reduced mode: notice + allow |
 
 ## Troubleshooting
 
@@ -309,7 +319,7 @@ and shipped in the release archive; without one, the dispatcher compiles the too
 | Hooks do nothing at all | Check `$KIMI_CODE_HOME/logs/*.log` for a `run` line: unsupported platform, no compiler, or compile failure. Every failure is fail-open |
 | First prompt after install is slow | The fallback compile runs once (~1 s) and is cached; later prompts use the cached binary |
 | Nudge stays silent on a structure question | It only fires on its keyword list; confirm the hook runs with `CBM_NUDGE_DUMP=1` and read the payload log |
-| Guard blocks a command you know is safe | Read the rule in `secret-guard.log`, then use `grep -c`, pipe through `secret_guard redact`, or disable the plugin |
+| Guard blocks a command you know is safe | Read the rule in `secret-guard.log`, then use `grep -c`, pipe through `secret_guard redact`, set `SECRET_GUARD_MODE=strict` to block instead of notice, or disable the plugin |
 | Index job fails with `over_memory_budget` | Index the sub-repository, not the workspace root; raise `CBM_MEM_BUDGET_MB` and restart the server |
 | Graph answers look stale | `/codebase-memory:status`, then `/codebase-memory:reindex` for the repository that owns the files |
 
